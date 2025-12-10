@@ -134,3 +134,76 @@ python -m scripts.eval_micrograph --micrograph-dir path/to/micrographs \
 **Darcy's Law**: `K = (Q * μ * L) / (A * ΔP)` where K=permeability, Q=flow rate, μ=viscosity (0.5 default), L=length, A=cross-section area, ΔP=pressure drop
 
 **Flow rate calculation** (`src/physics.py:get_flow_rate`): Section-wise averaging of velocity × fluid area, not simple integration
+
+# VAE for Microstructure Flow Field Prediction
+
+## Project Overview
+Variational Autoencoder (VAE) implementation for learning latent representations of steady-state velocity fields in 2D microstructures. The VAE compresses high-dimensional flow simulation data into compact latent spaces for computational efficiency.
+
+## Architecture Components
+
+### VAE Structure (`src/vae/`)
+- **Encoder** (`encoder.py`): 3-stage downsampling with ResidualBlocks + AttentionBlock, outputs mean/logvar for reparameterization
+  - Input: `(B, in_channels, H, W)` → Latent: `(B, latent_channels, H/4, W/4)`
+  - Uses asymmetric padding `(0,1,0,1)` for stride-2 convs
+- **Decoder** (`decoder.py`): Mirror architecture with 2 upsampling stages
+- **VariationalAutoencoder** (`autoencoder.py`): Combined encoder-decoder with `save_model()`/`load_model()` methods
+  - Saves both model weights (`vae.pt`) and training logs (`vae_log.json`) to same directory
+
+### Training Loop (`pretrain_vae.py`)
+- **Loss composition**: `reconstruction_loss + coeff * kl_loss` where `coeff=1e-3`
+- **Critical preprocessing**: Divide velocity targets by `scale_factor=0.004389363341033459` before training
+- **Masking**: Predictions multiplied by microstructure mask (`preds * mask`) to zero out solid regions
+- Uses `normalized_mae_loss()` for reconstruction (normalizes by target magnitude per sample)
+
+## Data Pipeline (`utils/dataset.py`)
+
+### MicroFlowDataset
+Loads 5 fields per sample from `.pt` files:
+- `microstructure` (domain.pt): Binary mask of fluid/solid regions
+- `velocity` (U.pt): 3-channel field, only channels `[0,1]` used (x,y components)
+- `pressure` (p.pt), `dxyz` (grid spacing), `permeability`
+
+**Dual-direction support**: Concatenates `x/` and `y/` subdirectories if both exist, rotating y-flow fields by 90° (`_rotate_y_field()`)
+
+**Augmentation**: Horizontal flips for microstructure/pressure, with sign correction for y-velocity component
+
+## Key Conventions
+
+### Config Pattern
+Use `argparse` parsers in `config/` directory:
+```python
+from config.vae import parser
+args = parser.parse_args()
+```
+Required arg: `--in-channels`, defaults provided for `--latent-channels=4`, `--batch-size=10`, etc.
+
+### Model Initialization
+Always print trainable parameters in `__init__`:
+```python
+print(f'Trainable parameters: {self.trainable_params}.')
+```
+
+### Building Blocks (`src/vae/blocks.py`, `src/common.py`)
+- **ResidualBlock**: GroupNorm(32) → SiLU → Conv, handles channel mismatch via 1×1 conv
+- **AttentionBlock**: Uses custom `SelfAttention` from `src/common.py`, operates on flattened spatial dims
+- **Padding utility**: `get_padding(kernel_size)` handles even/odd kernels
+
+## Running Training
+
+```bash
+python pretrain_vae.py --in-channels 2 --dataset-dir /path/to/rve_5k_xy
+```
+
+Default saves to `trained/vae/`. Model automatically saves after each epoch with accumulated training logs.
+
+## Critical Implementation Details
+
+1. **KL divergence** expects `logvar` not variance: `kl_divergence(mu=mean, logvar=logvar)`
+2. **Encoder sampling** uses reparameterization: `mu + eps * exp(0.5*logvar)`
+3. **Data loading** uses 80/20 train/val split with fixed seed (2024) by default
+4. **Device handling**: Auto-selects CUDA if available via `args.device`
+5. **PyTorch version**: Pinned to 2.1.0 with CUDA 12.1, numpy must be <2.0
+
+## UNet Component
+Separate U-Net implementation exists in `src/unet/` (likely for direct prediction), shares common blocks from `src/common.py`.
