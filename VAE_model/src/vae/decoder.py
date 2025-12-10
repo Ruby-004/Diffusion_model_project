@@ -23,9 +23,9 @@ class Decoder(nn.Module):
 
 
         self.layers = nn.Sequential(
-            # nn.Conv2d(self.in_channels, self.in_channels, kernel_size=1, padding=0),
+            # nn.Conv3d(self.in_channels, self.in_channels, kernel_size=1, padding=0),
 
-            nn.Conv2d(self.in_channels, 512, kernel_size=self.kernel_size, padding=padding),
+            nn.Conv3d(self.in_channels, 512, kernel_size=self.kernel_size, padding=padding),
 
             # ResidualBlock(in_channels=512, out_channels=512),
 
@@ -36,20 +36,20 @@ class Decoder(nn.Module):
 
             ResidualBlock(in_channels=512, out_channels=512),
 
-            # (B, C, H, W) -> (B, C, 2*H, 2*W)
+            # (B, C, D, H, W) -> (B, C, 2*D, 2*H, 2*W)
             nn.Upsample(scale_factor=2),
 
-            nn.Conv2d(512, 256, kernel_size=self.kernel_size, padding=padding),
+            nn.Conv3d(512, 256, kernel_size=self.kernel_size, padding=padding),
 
             ResidualBlock(in_channels=256, out_channels=256),
 
             ResidualBlock(in_channels=256, out_channels=256),
 
 
-            # (B, C, 2*H, 2*W) -> (B, C, 4*H, 4*W)
+            # (B, C, 2*D, 2*H, 2*W) -> (B, C, 4*D, 4*H, 4*W)
             nn.Upsample(scale_factor=2),
 
-            nn.Conv2d(256, 128, kernel_size=self.kernel_size, padding=padding),
+            nn.Conv3d(256, 128, kernel_size=self.kernel_size, padding=padding),
 
             ResidualBlock(in_channels=128, out_channels=128),
 
@@ -62,7 +62,7 @@ class Decoder(nn.Module):
 
             nn.SiLU(),
 
-            nn.Conv2d(128, self.out_channels, kernel_size=self.kernel_size, padding=padding),
+            nn.Conv3d(128, self.out_channels, kernel_size=self.kernel_size, padding=padding),
         )
 
         print(f'Trainable parameters: {self.trainable_params}.')

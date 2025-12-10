@@ -7,7 +7,7 @@ parser.add_argument(
     '--dataset-dir',
     type=str,
     # required=True,
-    default='C:/Users/alexd/Downloads/sample',
+    default='C:/Users/alexd/Downloads/dataset_3d',
     help='Directory for dataset.'
 )
 parser.add_argument(
@@ -20,8 +20,8 @@ parser.add_argument(
 parser.add_argument(
     '--in-channels',
     type=int,
-    required=True,
-    help='Number of channels in input data.'
+    default=6,
+    help='Number of channels in input data (6 = 3 from U_2d + 3 from U).'
 )
 parser.add_argument(
     '--latent-channels',
@@ -39,8 +39,8 @@ parser.add_argument(
 parser.add_argument(
     '--batch-size',
     type=int,
-    default=10,
-    help='Batch size.'
+    default=1,
+    help='Batch size (reduced to 1 for 3D Conv memory management).'
 )
 parser.add_argument(
     '--num-epochs',
@@ -57,6 +57,6 @@ parser.add_argument(
 parser.add_argument(
     '--learning-rate',
     type=float,
-    default=1e-5,  # Very low for large 3D model stability
+    default=1e-6,  # Reduced for stability with 3D model
     help='Learning rate.'
 )
