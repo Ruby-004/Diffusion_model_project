@@ -37,7 +37,8 @@ class MicroFlowDataset(Dataset):
 
         meta_dict = {
             'microstructure': 'domain.pt',
-            'velocity': 'U.pt',
+            'velocity_input': 'U_2d.pt',  # 2D flow field (input)
+            'velocity': 'U.pt',            # 3D flow field (target)
             'pressure': 'p.pt',
             'dxyz': 'dxyz.pt',
         }
@@ -114,18 +115,26 @@ class MicroFlowDataset(Dataset):
         # Reshape to [samples, channels, depth, H, W] for Conv3d compatibility
         # Pad depth to 12 (divisible by 4 for two stride-2 downsamples)
         microstructure = self.data['microstructure'][idx].permute(1, 0, 2, 3).float()  # [C, D, H, W]
-        velocity = self.data['velocity'][idx, :, [0,1], :, :].permute(1, 0, 2, 3).float()  # [2, D, H, W]
+        
+        # Input: 2D flow field (only x,y components, z is null)
+        velocity_input = self.data['velocity_input'][idx, :, [0,1], :, :].permute(1, 0, 2, 3).float()  # [2, D, H, W]
+        
+        # Target: 3D flow field (only x,y components)
+        velocity_target = self.data['velocity'][idx, :, [0,1], :, :].permute(1, 0, 2, 3).float()  # [2, D, H, W]
+        
         pressure = self.data['pressure'][idx].permute(1, 0, 2, 3).float()  # [C, D, H, W]
         
         # Pad depth dimension from 11 to 12 by replicating the last slice
         import torch.nn.functional as F
         microstructure = F.pad(microstructure, (0, 0, 0, 0, 0, 1), mode='replicate')  # [C, 12, H, W]
-        velocity = F.pad(velocity, (0, 0, 0, 0, 0, 1), mode='replicate')  # [2, 12, H, W]
+        velocity_input = F.pad(velocity_input, (0, 0, 0, 0, 0, 1), mode='replicate')  # [2, 12, H, W]
+        velocity_target = F.pad(velocity_target, (0, 0, 0, 0, 0, 1), mode='replicate')  # [2, 12, H, W]
         pressure = F.pad(pressure, (0, 0, 0, 0, 0, 1), mode='replicate')  # [C, 12, H, W]
         
         sample = {
             'microstructure': microstructure,
-            'velocity': velocity,
+            'velocity_input': velocity_input,
+            'velocity': velocity_target,
             'pressure': pressure,
             'dxyz': self.data['dxyz'][idx].float(),
             'permeability': self.data['permeability'][idx] if 'permeability' in self.data else torch.tensor(0.0)
@@ -184,6 +193,9 @@ class MicroFlowDataset(Dataset):
 
         """
         stats = {
+            'U_2d': {
+                'max': self.data.get('velocity_input', torch.tensor(0.0)).abs().max().item()
+            },
             'U': {
                 'max': self.data.get('velocity', torch.tensor(0.0)).abs().max().item()
             },

@@ -95,16 +95,20 @@ def main():
             print(f'Training, batch {i}')
 
             mask = data['microstructure'].to(args.device)
+            inputs = data['velocity_input'].to(args.device)
             targets = data['velocity'].to(args.device)
+            
+            # Scale both inputs and targets
+            inputs = inputs / scale_factor
             targets = targets / scale_factor
-
 
             # noise = torch.randn(
             #     latent_shape, generator=generator, device=device
             # )
             
-            preds, (mean, logvar) = vae(targets)
+            preds, (mean, logvar) = vae(inputs)
             preds = preds * mask
+            targets = targets * mask
 
             # mean, logvar = encoder(targets)
             # # sample
@@ -157,14 +161,19 @@ def main():
             for j, data in enumerate(val_loader):
                 
                 mask = data['microstructure'].to(args.device)
+                inputs = data['velocity_input'].to(args.device)
                 targets = data['velocity'].to(args.device)
+                
+                # Scale both inputs and targets
+                inputs = inputs / scale_factor
                 targets = targets / scale_factor
 
                 # noise = torch.randn(
                 #     latent_shape, generator=generator, device=device
                 # )
-                preds, (mean, logvar) = vae(targets)
+                preds, (mean, logvar) = vae(inputs)
                 preds = preds * mask
+                targets = targets * mask
                 
                 # mean, logvar = encoder(targets)
                 # # sample
