@@ -35,8 +35,6 @@ class VariationalAutoencoder(nn.Module):
             kernel_size=kernel_size
         )
 
-        print(f'Trainable parameters: {self.trainable_params}.')
-
     def forward(self, x: torch.Tensor):
         """
         Forward pass through the autoencoder.
@@ -110,10 +108,3 @@ class VariationalAutoencoder(nn.Module):
         model.load_model(folder, device=device)
 
         return model
-    
-    @property
-    def trainable_params(self):
-        total = sum(
-            [p.numel() for p in self.parameters() if p.requires_grad]
-        )
-        return total

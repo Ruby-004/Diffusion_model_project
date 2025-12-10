@@ -22,21 +22,21 @@ class Encoder(nn.Module):
         padding = get_padding(self.kernel_size)
 
         self.layers = nn.Sequential(
-            nn.Conv3d(self.in_channels, 128, kernel_size=self.kernel_size, padding=padding),
+            nn.Conv2d(self.in_channels, 128, kernel_size=self.kernel_size, padding=padding),
 
             ResidualBlock(in_channels=128, out_channels=128),
 
             ResidualBlock(in_channels=128, out_channels=128),
 
-            # (B, C, D, H, W) -> (B, C, D/2, H/2, W/2)
-            nn.Conv3d(128, 128, kernel_size=self.kernel_size, stride=2, padding=padding),
+            # (B, C, H, W) -> (B, C, H/2, W/2)
+            nn.Conv2d(128, 128, kernel_size=self.kernel_size, stride=2, padding=0),
 
             ResidualBlock(in_channels=128, out_channels=256),
 
             ResidualBlock(in_channels=256, out_channels=256),
 
-            # (B, C, D/2, H/2, W/2) -> (B, C, D/4, H/4, W/4)
-            nn.Conv3d(256, 256, kernel_size=self.kernel_size, stride=2, padding=padding),
+            # (B, C, H/2, W/2) -> (B, C, H/4, W/4)
+            nn.Conv2d(256, 256, kernel_size=self.kernel_size, stride=2, padding=0),
 
             ResidualBlock(in_channels=256, out_channels=512),
 
@@ -49,23 +49,29 @@ class Encoder(nn.Module):
 
             nn.SiLU(),
 
-            nn.Conv3d(512, 2*self.out_channels, kernel_size=self.kernel_size, padding=padding),
+            nn.Conv2d(512, 2*self.out_channels, kernel_size=self.kernel_size, padding=padding),
 
-            # nn.Conv3d(2*self.out_channels, 2*self.out_channels, kernel_size=1, padding=0)
+            # nn.Conv2d(2*self.out_channels, 2*self.out_channels, kernel_size=1, padding=0)
         )
 
         print(f'Trainable parameters: {self.trainable_params}.')
 
     def forward(
         self,
-        x: torch.Tensor, # (B, in_channels, D, H, W)
-        # noise: torch.Tensor # (B, out_channels, D/8, H/8, W/8)
+        x: torch.Tensor, # (B, in_channels, H, W)
+        # noise: torch.Tensor # (B, out_channels, H/8, W/8)
     ):
 
         for module in self.layers:
+            if getattr(module, 'stride', None) == (2, 2):
+                # for layers where we down-scale with a stride of 2,
+                # asymmetrically pad image
+                left, right, top, bottom = 0, 1, 0, 1
+                x = F.pad(x, (left, right, top, bottom))
+
             x = module(x)
         
-        # from (B, C, d, h, w) -> 2 tensors of shape (B, C/2, d, h, w)
+        # from (B, C, h, w) -> 2 tensors of shape (B, C/2, h, w)
         mu, log_var = torch.chunk(x, 2, dim=1)
 
         # var = log_var.exp()
