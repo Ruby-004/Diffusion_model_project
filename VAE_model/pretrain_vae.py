@@ -1,5 +1,7 @@
 import time
 import os
+import json
+import os.path as osp
 
 import torch
 import torch.optim as optim
@@ -50,7 +52,24 @@ os.makedirs(args.save_dir, exist_ok=True)
 # learning_rate = 1e-5
 seed = None
 # latent_shape = (1, MID_CHANNELS, 64, 64)
-scale_factor = 0.004389363341033459  # May need recalculation for 3D data
+# Load normalization statistics
+stats_file = osp.join(args.dataset_dir, 'statistics.json')
+if not os.path.exists(stats_file):
+    print(f"ERROR: statistics.json not found at {stats_file}")
+    print("Please ensure the dataset has been processed and statistics computed.")
+    exit(1)
+
+with open(stats_file, 'r') as f:
+    statistics = json.load(f)
+
+# Compute max value across both velocity fields for [0,1] normalization
+max_U_2d = statistics['U_2d']['max']
+max_U_3d = statistics['U']['max']
+max_velocity = max(max_U_2d, max_U_3d)
+
+print(f"Loaded statistics: max_U_2d={max_U_2d:.6f}, max_U_3d={max_U_3d:.6f}")
+print(f"Using max_velocity={max_velocity:.6f} for [0,1] normalization")
+
 gradient_accumulation_steps = 10  # Accumulate gradients to simulate larger batch
 
 
@@ -140,9 +159,9 @@ def main():
             inputs = velocity_combined
             targets = inputs.clone()  # Autoencoder: reconstruct the same combined input
             
-            # Scale both inputs and targets
-            inputs = inputs / scale_factor
-            targets = targets / scale_factor
+            # Normalize both inputs and targets to [0,1]
+            inputs = inputs / max_velocity
+            targets = targets / max_velocity
             
             preds, (mean, logvar) = vae(inputs)
             
@@ -152,9 +171,12 @@ def main():
             preds = preds * mask
             targets = targets * mask
 
-            reconstruction_loss = normalized_mae_loss(
-                output=preds, target=targets
-            )
+            # Expand mask to match channel dimension [B,1,D,H,W] -> [B,6,D,H,W]
+            mask_expanded = mask.expand_as(preds)
+            # Use simple MAE since inputs are normalized to [0,1]
+            fluid_preds = preds[mask_expanded > 0.5]
+            fluid_targets = targets[mask_expanded > 0.5]
+            reconstruction_loss = torch.mean(torch.abs(fluid_preds - fluid_targets))
             kl_loss = kl_divergence(mu=mean, logvar=logvar)
             loss = (reconstruction_loss + kl_coeff * kl_loss) / gradient_accumulation_steps
             print(f'Recons/KL loss: {reconstruction_loss.item():.6f}/{kl_loss.item():.6f}')
@@ -208,9 +230,9 @@ def main():
                 inputs = velocity_combined
                 targets = inputs.clone()  # Autoencoder: reconstruct the same combined input
                 
-                # Scale both inputs and targets
-                inputs = inputs / scale_factor
-                targets = targets / scale_factor
+                # Normalize both inputs and targets to [0,1]
+                inputs = inputs / max_velocity
+                targets = targets / max_velocity
 
                 # noise = torch.randn(
                 #     latent_shape, generator=generator, device=device
@@ -228,9 +250,12 @@ def main():
                 # latents = encoder.sample(mu=mean, logvar=logvar)
                 # preds = decoder(latents) * mask
 
-                reconstruction_loss = normalized_mae_loss(
-                    output=preds, target=targets
-                )
+                # Expand mask to match channel dimension [B,1,D,H,W] -> [B,6,D,H,W]
+                mask_expanded = mask.expand_as(preds)
+                # Use simple MAE since inputs are normalized to [0,1]
+                fluid_preds = preds[mask_expanded > 0.5]
+                fluid_targets = targets[mask_expanded > 0.5]
+                reconstruction_loss = torch.mean(torch.abs(fluid_preds - fluid_targets))
                 kl_loss = kl_divergence(mu=mean, logvar=logvar)
                 loss = reconstruction_loss + kl_coeff * kl_loss
                 print(f'Recons/KL loss: {reconstruction_loss.item():.6f}/{kl_loss.item():.6f}')
