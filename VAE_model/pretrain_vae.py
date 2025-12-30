@@ -92,8 +92,8 @@ def main():
 
     """Load data"""
 
-    train_loader, val_loader = get_loader(
-        root_dir=args.dataset_dir, batch_size=args.batch_size
+    train_loader, val_loader, test_loader = get_loader(
+        root_dir=args.dataset_dir, batch_size=args.batch_size, use_vae_dataset=True
     )
 
     """Model"""
@@ -149,15 +149,12 @@ def main():
 
             # Data shape: [batch, channels, depth, height, width]
             mask = data['microstructure'].to(args.device)
-            velocity_2d = data['velocity_input'].to(args.device)  # U_2d.pt - 2D flow
-            velocity_3d = data['velocity'].to(args.device)        # U.pt - 3D flow
+            velocity = data['velocity'].to(args.device)  # Either U_2d or U (3 channels)
+            is_2d = data['is_2d']  # Boolean flag indicating if this is 2D flow
             
-            # Concatenate both velocity fields: [batch, 6 channels (3 from U_2d + 3 from U), depth, height, width]
-            velocity_combined = torch.cat([velocity_2d, velocity_3d], dim=1)  # [batch, 6, depth, height, width]
-            
-            # Keep 3D structure for Conv3d layers: [batch, channels, depth, height, width]
-            inputs = velocity_combined
-            targets = inputs.clone()  # Autoencoder: reconstruct the same combined input
+            # Keep 3D structure for Conv3d layers: [batch, 3, depth, height, width]
+            inputs = velocity
+            targets = inputs.clone()  # Autoencoder: reconstruct the same input
             
             # Normalize both inputs and targets to [0,1]
             inputs = inputs / max_velocity
@@ -171,7 +168,7 @@ def main():
             preds = preds * mask
             targets = targets * mask
 
-            # Expand mask to match channel dimension [B,1,D,H,W] -> [B,6,D,H,W]
+            # Expand mask to match channel dimension [B,1,D,H,W] -> [B,3,D,H,W]
             mask_expanded = mask.expand_as(preds)
             # Use simple MAE since inputs are normalized to [0,1]
             fluid_preds = preds[mask_expanded > 0.5]
@@ -179,6 +176,11 @@ def main():
             reconstruction_loss = torch.mean(torch.abs(fluid_preds - fluid_targets))
             kl_loss = kl_divergence(mu=mean, logvar=logvar)
             loss = (reconstruction_loss + kl_coeff * kl_loss) / gradient_accumulation_steps
+            
+            # Print which type of flow is being processed
+            num_2d = is_2d.sum().item()
+            num_3d = len(is_2d) - num_2d
+            print(f'Batch contains {num_2d} 2D and {num_3d} 3D samples')
             print(f'Recons/KL loss: {reconstruction_loss.item():.6f}/{kl_loss.item():.6f}')
 
             loss.backward()
@@ -220,15 +222,12 @@ def main():
                 
                 # Data shape: [batch, channels, depth, height, width]
                 mask = data['microstructure'].to(args.device)
-                velocity_2d = data['velocity_input'].to(args.device)  # U_2d.pt - 2D flow
-                velocity_3d = data['velocity'].to(args.device)        # U.pt - 3D flow
+                velocity = data['velocity'].to(args.device)  # Either U_2d or U (3 channels)
+                is_2d = data['is_2d']  # Boolean flag indicating if this is 2D flow
                 
-                # Concatenate both velocity fields: [batch, 6 channels (3 from U_2d + 3 from U), depth, height, width]
-                velocity_combined = torch.cat([velocity_2d, velocity_3d], dim=1)  # [batch, 6, depth, height, width]
-                
-                # Keep 3D structure for Conv3d layers: [batch, channels, depth, height, width]
-                inputs = velocity_combined
-                targets = inputs.clone()  # Autoencoder: reconstruct the same combined input
+                # Keep 3D structure for Conv3d layers: [batch, 3, depth, height, width]
+                inputs = velocity
+                targets = inputs.clone()  # Autoencoder: reconstruct the same input
                 
                 # Normalize both inputs and targets to [0,1]
                 inputs = inputs / max_velocity
@@ -250,7 +249,7 @@ def main():
                 # latents = encoder.sample(mu=mean, logvar=logvar)
                 # preds = decoder(latents) * mask
 
-                # Expand mask to match channel dimension [B,1,D,H,W] -> [B,6,D,H,W]
+                # Expand mask to match channel dimension [B,1,D,H,W] -> [B,3,D,H,W]
                 mask_expanded = mask.expand_as(preds)
                 # Use simple MAE since inputs are normalized to [0,1]
                 fluid_preds = preds[mask_expanded > 0.5]
@@ -258,6 +257,11 @@ def main():
                 reconstruction_loss = torch.mean(torch.abs(fluid_preds - fluid_targets))
                 kl_loss = kl_divergence(mu=mean, logvar=logvar)
                 loss = reconstruction_loss + kl_coeff * kl_loss
+                
+                # Print which type of flow is being processed
+                num_2d = is_2d.sum().item()
+                num_3d = len(is_2d) - num_2d
+                print(f'Val batch {j}: {num_2d} 2D and {num_3d} 3D samples')
                 print(f'Recons/KL loss: {reconstruction_loss.item():.6f}/{kl_loss.item():.6f}')
 
                 running_recons += reconstruction_loss.item()
@@ -283,14 +287,53 @@ def main():
         # save model
         vae.save_model(args.save_dir, log=log_dict)
 
-        # # save sample
-        # sample = {
-        #     'target': targets,
-        #     'prediction': preds.detach(),
-        #     'recons': reconstruction_loss.item(),
-        #     'kl': kl_loss.item()
-        # }
-        # torch.save(sample, osp.join(save_dir, 'sample_final.pt'))
+    # Final test evaluation after all epochs
+    print("\n" + "="*50)
+    print("Running final test set evaluation...")
+    print("="*50)
+    
+    with torch.no_grad():
+        running_recons = 0
+        running_kl = 0
+        for k, data in enumerate(test_loader):
+            mask = data['microstructure'].to(args.device)
+            velocity = data['velocity'].to(args.device)
+            is_2d = data['is_2d']
+            
+            inputs = velocity / max_velocity
+            targets = inputs.clone()
+            
+            preds, (mean, logvar) = vae(inputs)
+            logvar = torch.clamp(logvar, min=-10, max=10)
+            
+            preds = preds * mask
+            targets = targets * mask
+            
+            mask_expanded = mask.expand_as(preds)
+            fluid_preds = preds[mask_expanded > 0.5]
+            fluid_targets = targets[mask_expanded > 0.5]
+            reconstruction_loss = torch.mean(torch.abs(fluid_preds - fluid_targets))
+            kl_loss = kl_divergence(mu=mean, logvar=logvar)
+            
+            num_2d = is_2d.sum().item()
+            num_3d = len(is_2d) - num_2d
+            print(f'Test batch {k}: {num_2d} 2D and {num_3d} 3D samples - Recons/KL: {reconstruction_loss.item():.6f}/{kl_loss.item():.6f}')
+            
+            running_recons += reconstruction_loss.item()
+            running_kl += kl_loss.item()
+        
+        avg_recons_test = running_recons / (k+1)
+        avg_kl_test = running_kl / (k+1)
+        
+        log_dict['loss']['recons_test'] = avg_recons_test
+        log_dict['loss']['kl_test'] = avg_kl_test
+        
+        print(f"\nFinal Test Results: recons={avg_recons_test:.6f} | kl={avg_kl_test:.6f}")
+        print("="*50)
+    
+    # Save final model with test results
+    vae.save_model(args.save_dir, log=log_dict)
+    print(f"\nTraining complete! Model saved to {args.save_dir}")
 
 
 

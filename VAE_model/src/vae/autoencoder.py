@@ -88,20 +88,45 @@ class VariationalAutoencoder(nn.Module):
         self.load_state_dict(torch.load(model_path, map_location=device))
     
     @classmethod
-    def from_directory(cls, folder, device=None):
+    def from_directory(cls, folder, device=None, in_channels=None, latent_channels=None, kernel_size=3):
         """
         Create model instance from saved parameters.
+        
+        Args:
+            folder: Directory containing vae.pt and optionally vae_log.json
+            device: Device to load model on
+            in_channels: Number of input channels (if None, tries to read from log or defaults to 2)
+            latent_channels: Number of latent channels (if None, tries to read from log or defaults to 4)
+            kernel_size: Kernel size (default 3)
         """
-        # load log
+        # Try to load log if it exists
         log_path = osp.join(folder, cls._log_filename)
-        with open(log_path, 'r') as f:
-            log = json.load(f)
+        if osp.exists(log_path):
+            try:
+                with open(log_path, 'r') as f:
+                    log = json.load(f)
+                
+                # Use log values if parameters not provided
+                if in_channels is None and 'in_channels' in log:
+                    in_channels = log['in_channels']
+                if latent_channels is None and 'latent_channels' in log:
+                    latent_channels = log['latent_channels']
+                if 'kernel_size' in log:
+                    kernel_size = log['kernel_size']
+            except (json.JSONDecodeError, KeyError):
+                pass
+        
+        # Use defaults if still None
+        if in_channels is None:
+            in_channels = 2  # Default for velocity fields (vx, vy)
+        if latent_channels is None:
+            latent_channels = 4
 
         # create model
         model = cls(
-            in_channels=log['in_channels'],
-            latent_channels=log['latent_channels'],
-            kernel_size=log['kernel_size']
+            in_channels=in_channels,
+            latent_channels=latent_channels,
+            kernel_size=kernel_size
         )
 
         # load parameters

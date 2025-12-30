@@ -20,8 +20,8 @@ parser.add_argument(
 parser.add_argument(
     '--in-channels',
     type=int,
-    default=6,
-    help='Number of channels in input data (6 = 3 from U_2d + 3 from U).'
+    default=3,
+    help='Number of channels in input data (3 velocity components: vx, vy, vz).'
 )
 parser.add_argument(
     '--latent-channels',
