@@ -120,7 +120,7 @@ group_train.add_argument(
     '--predictor-type',
     type=str,
     default='velocity',
-    choices=['velocity', 'pressure'],
+    choices=['velocity', 'pressure', 'latent-diffusion'],
     help='Type of ML predictor (for the velocity or pressure field)'
 )
 group_train.add_argument(
@@ -185,6 +185,24 @@ group_train.add_argument(
     type=bool,
     default=True,
     help='Whether to use distance transform for input image.'
+)
+group_train.add_argument(
+    '--vae-path',
+    type=str,
+    default=None,
+    help='Path to pre-trained VAE model (required for latent-diffusion predictor).'
+)
+group_train.add_argument(
+    '--num-slices',
+    type=int,
+    default=10,
+    help='Number of 2D slices in 3D flow field (for latent-diffusion predictor).'
+)
+group_train.add_argument(
+    '--use-3d',
+    type=bool,
+    default=False,
+    help='Whether to use 3D velocity data from dataset.'
 )
 
 
@@ -266,7 +284,8 @@ def process_args(args: argparse.Namespace):
             'batch_size': args.batch_size,
             'augment': args.augment,
             'shuffle': args.shuffle,
-            'k_folds': args.k_folds
+            'k_folds': args.k_folds,
+            'use_3d': args.use_3d
         },
         'training': {
             'device': args.device,
@@ -290,7 +309,9 @@ def process_args(args: argparse.Namespace):
                     'final_activation': args.final_activation,
                     'attention': args.attention
                 },
-                'distance_transform': args.distance_transform
+                'distance_transform': args.distance_transform,
+                'vae_path': args.vae_path,
+                'num_slices': args.num_slices
             }
         },
         'optimization': {

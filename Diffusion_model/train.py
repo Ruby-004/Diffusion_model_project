@@ -12,6 +12,7 @@ from optuna.trial import Trial
 from utils.dataset import get_loader
 from src.helper import set_model, run_epoch
 from src.unet.metrics import cost_function
+from src.predictor import VelocityPredictor, PressurePredictor, LatentDiffusionPredictor
 
 from config import parser, process_args, make_log_folder
 
@@ -21,7 +22,8 @@ args = parser.parse_args()
 
 def train(
     train_loader,
-    test_loader,
+    val_loader,
+    test_loader=None,
     trial: Trial = None
 ):
     
@@ -76,7 +78,7 @@ def train(
         # run epoch
         start_time = time.time()
         avg_train_loss, avg_val_loss = run_epoch(
-            loaders=(train_loader, test_loader),
+            loaders=(train_loader, val_loader),
             predictor=predictor,
             optimizer=optimizer,
             criterion=criterion,
@@ -114,6 +116,52 @@ def train(
             # Handle pruning based on the intermediate value
             if trial.should_prune():
                 raise optuna.exceptions.TrialPruned()
+    
+    # Evaluate on test set after training completes
+    if test_loader is not None:
+        print("\nEvaluating on test set...")
+        predictor.eval()
+        
+        # Load best model for test evaluation
+        predictor.load_state_dict(torch.load(best_model_path, map_location=device))
+        
+        from src.helper import select_input_output
+        
+        if isinstance(predictor, (VelocityPredictor, PressurePredictor)):
+            option = 'velocity' if isinstance(predictor, VelocityPredictor) else 'pressure'
+        else:
+            option = 'latent-diffusion'
+        
+        test_loss = 0
+        num_test_batch = len(test_loader)
+        with torch.no_grad():
+            for k, data in enumerate(test_loader):
+                print(f"Test set: batch [{k+1}/{num_test_batch}]")
+                
+                input, targets = select_input_output(data, option, device)
+                
+                if option == 'latent-diffusion':
+                    img = input[0]
+                    velocity_2d = input[1]
+                    target_latents = predictor.encode_target(targets, velocity_2d)
+                    noise = torch.randn_like(target_latents)
+                    preds = predictor(img, velocity_2d, noise)
+                    loss = criterion(output=preds, target=target_latents)
+                else:
+                    preds = predictor(*input)
+                    targets = predictor.normalizer['output'](targets)
+                    loss = criterion(output=preds, target=targets)
+                
+                test_loss += loss.item()
+        
+        avg_test_loss = test_loss / num_test_batch
+        log_dict['test_loss'] = avg_test_loss
+        
+        # Save updated log with test loss
+        with open(log_path, 'w') as f:
+            json.dump(log_dict, f, indent=4)
+        
+        print(f"\nTest Loss: {avg_test_loss}")
             
     return avg_train_loss, avg_val_loss
 
@@ -152,17 +200,18 @@ def objective(trial: Trial):
     )
     
     # load data
-    train_loader, test_loader = get_loader(
+    train_loader, val_loader, test_loader = get_loader(
         root_dir=args.root_dir,
         batch_size=args.batch_size,
         shuffle=args.shuffle,
         augment=args.augment,
-        k_folds=args.k_folds,
-        num_workers=1
+        k_folds=None,
+        num_workers=1,
+        use_3d=args.use_3d
     )[0]
 
     # train
-    _, val_loss = train(train_loader, test_loader, trial)
+    _, val_loss = train(train_loader, val_loader, test_loader, trial)
 
     return val_loss
 
@@ -172,17 +221,18 @@ if __name__=='__main__':
     if args.mode == 'train':
 
         # load data
-        train_loader, test_loader = get_loader(
+        train_loader, val_loader, test_loader = get_loader(
             root_dir=args.root_dir,
             batch_size=args.batch_size,
             shuffle=args.shuffle,
             augment=args.augment,
-            k_folds=args.k_folds,
-            num_workers=1
+            k_folds=None,
+            num_workers=1,
+            use_3d=args.use_3d
         )[0]
 
         # train
-        train(train_loader, test_loader)
+        train(train_loader, val_loader, test_loader)
 
     elif args.mode == 'CV':
         # Cross-Validation
@@ -194,16 +244,17 @@ if __name__=='__main__':
             shuffle=args.shuffle,
             augment=args.augment,
             k_folds=args.k_folds,
-            num_workers=1
+            num_workers=1,
+            use_3d=args.use_3d
         )
 
         # train
-        for i, (train_loader, test_loader) in enumerate(data_folds):
+        for i, (train_loader, val_loader, test_loader) in enumerate(data_folds):
             print(f'Cross-Validation [{i+1}/{args.k_folds}]')
 
             args.name = f'kfold-{i+1}.{args.k_folds}'
 
-            train(train_loader, test_loader)
+            train(train_loader, val_loader, test_loader)
 
 
     elif args.mode == 'optimize':

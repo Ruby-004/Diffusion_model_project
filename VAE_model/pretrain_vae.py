@@ -111,7 +111,12 @@ def main():
     vae.to(args.device)
     # encoder.to(device)
     # decoder.to(device)
-
+    
+    # Enable multi-GPU training if available
+    if args.device == "cuda" and torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
+        vae = torch.nn.DataParallel(vae)
+    
     print(f"Model loaded on {args.device}")
     if args.device == "cuda":
         print(f"GPU Memory after model load: {torch.cuda.memory_allocated(0)/1024**3:.2f} GB")
@@ -285,7 +290,9 @@ def main():
         #     json.dump(log_dict, f, indent=4)
 
         # save model
-        vae.save_model(args.save_dir, log=log_dict)
+        # Unwrap DataParallel before saving
+        model_to_save = vae.module if isinstance(vae, torch.nn.DataParallel) else vae
+        model_to_save.save_model(args.save_dir, log=log_dict)
 
     # Final test evaluation after all epochs
     print("\n" + "="*50)
@@ -332,7 +339,8 @@ def main():
         print("="*50)
     
     # Save final model with test results
-    vae.save_model(args.save_dir, log=log_dict)
+    model_to_save = vae.module if isinstance(vae, torch.nn.DataParallel) else vae
+    model_to_save.save_model(args.save_dir, log=log_dict)
     print(f"\nTraining complete! Model saved to {args.save_dir}")
 
 
