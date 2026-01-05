@@ -5,16 +5,29 @@ import os
 
 def main():
     parser = argparse.ArgumentParser(description='Plot training and validation loss from log.json')
-    parser.add_argument('--log-file', type=str, default='log.json', help='Path to log.json file')
+    parser.add_argument('path', nargs='?', default='log.json', help='Path to log.json file or directory containing it')
     parser.add_argument('--output', type=str, default='loss_plot.png', help='Output filename for the plot')
     args = parser.parse_args()
 
-    if not os.path.exists(args.log_file):
-        print(f"Error: {args.log_file} not found.")
-        return
+    log_file = args.path
+    if os.path.isdir(log_file):
+        log_file = os.path.join(log_file, 'log.json')
+
+    if not os.path.exists(log_file):
+        # Try looking in ../trained/ if a folder name was given but not found locally
+        if not os.path.exists(args.path) and not os.path.isabs(args.path):
+             potential_path = os.path.join('..', 'trained', args.path, 'log.json')
+             if os.path.exists(potential_path):
+                 log_file = potential_path
+             else:
+                 print(f"Error: {log_file} not found.")
+                 return
+        else:
+            print(f"Error: {log_file} not found.")
+            return
 
     # Read the log.json file
-    with open(args.log_file, 'r') as f:
+    with open(log_file, 'r') as f:
         data = json.load(f)
 
     # Extract the loss data

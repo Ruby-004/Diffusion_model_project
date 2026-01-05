@@ -43,6 +43,7 @@ def train(
 
     device = train_dict['device']
     learning_rate = train_dict['learning_rate']
+    weight_decay = train_dict['weight_decay']
     scheduler_kwargs = train_dict['scheduler']
     num_epochs = train_dict['num_epochs']
     cost_function_name = train_dict['cost_function']
@@ -60,7 +61,8 @@ def train(
 
     optimizer = optim.Adam(
         predictor.parameters(),
-        lr=learning_rate
+        lr=learning_rate,
+        weight_decay=weight_decay
     )
 
     scheduler = None

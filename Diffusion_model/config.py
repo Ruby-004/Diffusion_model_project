@@ -91,6 +91,12 @@ group_train.add_argument(
     help='Learning rate.'
 )
 group_train.add_argument(
+    '--weight-decay',
+    type=float,
+    default=0.0,
+    help='Weight decay (L2 penalty).'
+)
+group_train.add_argument(
     '--scheduler-flag',
     type=bool,
     default=False,
@@ -179,6 +185,12 @@ group_train.add_argument(
     type=str,
     default='',
     help='Expression determining the use of attention in U-Net model (e.g., "4..1"). For details, see model documentation.'
+)
+group_train.add_argument(
+    '--dropout',
+    type=float,
+    default=0.0,
+    help='Dropout probability.'
 )
 group_train.add_argument(
     '--distance-transform',
@@ -290,6 +302,7 @@ def process_args(args: argparse.Namespace):
         'training': {
             'device': args.device,
             'learning_rate': args.learning_rate,
+            'weight_decay': args.weight_decay,
             'scheduler': {
                 'flag': args.scheduler_flag,
                 'gamma': args.scheduler_gamma,
@@ -307,7 +320,8 @@ def process_args(args: argparse.Namespace):
                     'padding_mode': args.padding_mode,
                     'activation': args.activation,
                     'final_activation': args.final_activation,
-                    'attention': args.attention
+                    'attention': args.attention,
+                    'dropout': args.dropout
                 },
                 'distance_transform': args.distance_transform,
                 'vae_path': args.vae_path,
@@ -354,6 +368,8 @@ def make_log_folder(param_dict: dict):
     kernel_size = predictor_kwargs['model_kwargs']['kernel_size']
     padding_mode = predictor_kwargs['model_kwargs']['padding_mode']
     attention = predictor_kwargs['model_kwargs']['attention']
+    dropout = predictor_kwargs['model_kwargs']['dropout']
+    weight_decay = train_kwargs['weight_decay']
 
 
     # Create log folder
@@ -361,6 +377,7 @@ def make_log_folder(param_dict: dict):
     
     descr_str = f'in-{in_channels}-out-{out_channels}-' \
         f'f-{len(features)}-k-{kernel_size}-p-{padding_mode}-a-{attention}-' \
+        f'dr-{dropout}-wd-{weight_decay:.2e}-' \
         f'b-{batch_size}-lr-{learning_rate:.2e}-ep-{num_epochs}'
     
     sub_dir = time_stamp + f'_{name}_{predictor_type}_' + descr_str

@@ -58,13 +58,15 @@ class DoubleBlock(nn.Module):
         out_channels: int,
         kernel_size: int,
         padding_mode: str,
-        activation: nn.Module
+        activation: nn.Module,
+        dropout: float = 0.0
     ):
         super().__init__()
 
         self.kernel_size = kernel_size
         self.padding_mode = padding_mode
         self.activation = activation
+        self.dropout = dropout
 
         # layers
         self.block1 = Block(
@@ -81,10 +83,12 @@ class DoubleBlock(nn.Module):
             padding_mode=self.padding_mode,
             activation=activation
         )
+        self.dropout_layer = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor):
         x = self.block1(x)
         out = self.block2(x)
+        out = self.dropout_layer(out)
         return out
 
 

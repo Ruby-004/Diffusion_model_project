@@ -52,23 +52,6 @@ os.makedirs(args.save_dir, exist_ok=True)
 # learning_rate = 1e-5
 seed = None
 # latent_shape = (1, MID_CHANNELS, 64, 64)
-# Load normalization statistics
-stats_file = osp.join(args.dataset_dir, 'statistics.json')
-if not os.path.exists(stats_file):
-    print(f"ERROR: statistics.json not found at {stats_file}")
-    print("Please ensure the dataset has been processed and statistics computed.")
-    exit(1)
-
-with open(stats_file, 'r') as f:
-    statistics = json.load(f)
-
-# Compute max value across both velocity fields for [0,1] normalization
-max_U_2d = statistics['U_2d']['max']
-max_U_3d = statistics['U']['max']
-max_velocity = max(max_U_2d, max_U_3d)
-
-print(f"Loaded statistics: max_U_2d={max_U_2d:.6f}, max_U_3d={max_U_3d:.6f}")
-print(f"Using max_velocity={max_velocity:.6f} for [0,1] normalization")
 
 gradient_accumulation_steps = 10  # Accumulate gradients to simulate larger batch
 
@@ -93,8 +76,40 @@ def main():
     """Load data"""
 
     train_loader, val_loader, test_loader = get_loader(
-        root_dir=args.dataset_dir, batch_size=args.batch_size, use_vae_dataset=True
+        root_dir=args.dataset_dir, batch_size=args.batch_size, use_vae_dataset=True, augment=args.augment
     )
+    
+    # Verify augmentation status
+    print(f"Data augmentation requested: {args.augment}")
+    if hasattr(train_loader.dataset, 'dataset'):
+        print(f"Train dataset augmentation: {train_loader.dataset.dataset.augment}")
+    if hasattr(val_loader.dataset, 'dataset'):
+        print(f"Val dataset augmentation: {val_loader.dataset.dataset.augment}")
+
+    # Load normalization statistics
+    stats_file = osp.join(args.dataset_dir, 'statistics.json')
+    if not os.path.exists(stats_file):
+        print(f"ERROR: statistics.json not found at {stats_file}")
+        print("Please ensure the dataset has been processed and statistics computed.")
+        exit(1)
+
+    with open(stats_file, 'r') as f:
+        statistics = json.load(f)
+
+    # Compute max value across both velocity fields for [0,1] normalization
+    # Handle case where U_2d might be missing (legacy statistics file)
+    if 'U_2d' in statistics:
+        max_U_2d = statistics['U_2d']['max']
+    else:
+        # Fallback: try to infer from U or just use U
+        print("WARNING: 'U_2d' key not found in statistics.json. Using 'U' for max_U_2d.")
+        max_U_2d = statistics['U']['max']
+
+    max_U_3d = statistics['U']['max']
+    max_velocity = max(max_U_2d, max_U_3d)
+
+    print(f"Loaded statistics: max_U_2d={max_U_2d:.6f}, max_U_3d={max_U_3d:.6f}")
+    print(f"Using max_velocity={max_velocity:.6f} for [0,1] normalization")
 
     """Model"""
 

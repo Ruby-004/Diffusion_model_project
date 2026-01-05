@@ -245,13 +245,18 @@ class MicroFlowDatasetVAE(Dataset):
     def __init__(
         self,
         root_dir: str,
-        augment: bool = False
+        augment: bool = False,
+        data: dict[str, torch.Tensor] = None
     ):
         self.root_dir = root_dir
         self.augment = augment
         self.data: dict[str, torch.Tensor] = {}
         
-        self.process()
+        if data is not None:
+            self.data = data
+            self.num_samples_per_field = self.data['microstructure'].shape[0]
+        else:
+            self.process()
     
     def process(self):
         """Load dataset."""
@@ -332,6 +337,29 @@ class MicroFlowDatasetVAE(Dataset):
         velocity = F.pad(velocity, (0, 0, 0, 0, 0, 1), mode='replicate')  # [3, 12, H, W]
         pressure = F.pad(pressure, (0, 0, 0, 0, 0, 1), mode='replicate')  # [C, 12, H, W]
         
+        # Augmentation
+        if self.augment:
+            # Random Horizontal Flip (W axis)
+            if torch.rand(1) < 0.5:
+                microstructure = torch.flip(microstructure, [-1])
+                velocity = torch.flip(velocity, [-1])
+                pressure = torch.flip(pressure, [-1])
+                velocity[0] = -velocity[0] # Negate vx
+
+            # Random Vertical Flip (H axis)
+            if torch.rand(1) < 0.5:
+                microstructure = torch.flip(microstructure, [-2])
+                velocity = torch.flip(velocity, [-2])
+                pressure = torch.flip(pressure, [-2])
+                velocity[1] = -velocity[1] # Negate vy
+            
+            # Random Depth Flip (D axis)
+            if torch.rand(1) < 0.5:
+                microstructure = torch.flip(microstructure, [-3])
+                velocity = torch.flip(velocity, [-3])
+                pressure = torch.flip(pressure, [-3])
+                velocity[2] = -velocity[2] # Negate vz
+
         sample = {
             'microstructure': microstructure,
             'velocity': velocity,  # Either U_2d or U depending on idx
@@ -537,15 +565,26 @@ def get_loader(
 
     # Dataset
     if use_vae_dataset:
-        dataset = MicroFlowDatasetVAE(
+        # Create training dataset (with augmentation if requested)
+        dataset_train = MicroFlowDatasetVAE(
             root_dir,
             augment=augment
         )
+        # Create evaluation dataset (NO augmentation), sharing data to save memory
+        dataset_eval = MicroFlowDatasetVAE(
+            root_dir,
+            augment=False,
+            data=dataset_train.data
+        )
+        # Use dataset_train as the primary reference for splitting logic
+        dataset = dataset_train
     else:
         dataset = MicroFlowDataset(
             root_dir,
             augment=augment
         )
+        dataset_train = dataset
+        dataset_eval = dataset
 
     # Paired split for VAE dataset: keep 2D and 3D from same microstructure together
     if use_vae_dataset and hasattr(dataset, 'num_samples_per_field'):
@@ -578,9 +617,11 @@ def get_loader(
         
         # Create Subset datasets
         from torch.utils.data import Subset
-        train_set = Subset(dataset, train_indices)
-        val_set = Subset(dataset, val_indices)
-        test_set = Subset(dataset, test_indices)
+        # Use dataset_train for training set
+        train_set = Subset(dataset_train, train_indices)
+        # Use dataset_eval for validation and test sets
+        val_set = Subset(dataset_eval, val_indices)
+        test_set = Subset(dataset_eval, test_indices)
     else:
         # Non-stratified split for regular dataset
         total_size = len(dataset)

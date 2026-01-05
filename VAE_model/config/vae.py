@@ -49,6 +49,11 @@ parser.add_argument(
     help='Number of epochs.'
 )
 parser.add_argument(
+    '--augment',
+    action='store_true',
+    help='Whether to use data augmentation.'
+)
+parser.add_argument(
     '--device',
     type=str,
     default=None,

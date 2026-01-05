@@ -24,7 +24,8 @@ class UNet(nn.Module):
         padding_mode = 'reflect',
         activation: _activ_type = 'silu',
         final_activation: _activ_type = None,
-        attention: str = ''
+        attention: str = '',
+        dropout: float = 0.0
     ) -> None:
         super().__init__()
 
@@ -33,6 +34,7 @@ class UNet(nn.Module):
         self.features: list[int] = features
         self.kernel_size: int = kernel_size
         self.padding_mode: str = padding_mode
+        self.dropout = dropout
         
         self._activation = activation
         self.activation = activation_function(activation)
@@ -56,7 +58,8 @@ class UNet(nn.Module):
             attention_heads=self._attention_heads,
             kernel_size=self.kernel_size,
             padding_mode=self.padding_mode,
-            activation=self.activation
+            activation=self.activation,
+            dropout=self.dropout
         )
 
         # bottleneck
@@ -66,7 +69,8 @@ class UNet(nn.Module):
             out_channels = 2 * self.features[-1],
             kernel_size=self.kernel_size,
             padding_mode=self.padding_mode,
-            activation=self.activation
+            activation=self.activation,
+            dropout=self.dropout
         )
 
         # decoder
@@ -75,7 +79,8 @@ class UNet(nn.Module):
             attention_heads=list(reversed(self._attention_heads)),
             kernel_size=self.kernel_size,
             padding_mode=self.padding_mode,
-            activation=self.activation
+            activation=self.activation,
+            dropout=self.dropout
         )
 
         # output part
@@ -149,7 +154,8 @@ def build_encoder(
     attention_heads: list[int | None],
     kernel_size: int,
     padding_mode: str,
-    activation: nn.Module
+    activation: nn.Module,
+    dropout: float = 0.0
 ) -> nn.ModuleList:
     """
     Build encoder part of U-Net.
@@ -169,7 +175,8 @@ def build_encoder(
             out_channels=next_channels,
             kernel_size=kernel_size,
             padding_mode=padding_mode,
-            activation=activation
+            activation=activation,
+            dropout=dropout
         )
         
         # Attention block
@@ -202,7 +209,8 @@ def build_decoder(
     attention_heads: list[int | None],
     kernel_size: int,
     padding_mode: str,
-    activation: nn.Module
+    activation: nn.Module,
+    dropout: float = 0.0
 ) -> nn.ModuleList:
     """
     Build decoder part of U-Net.
@@ -230,7 +238,8 @@ def build_decoder(
             out_channels=next_channels,
             kernel_size=kernel_size,
             padding_mode=padding_mode,
-            activation=activation
+            activation=activation,
+            dropout=dropout
         )
         
         # Attention block

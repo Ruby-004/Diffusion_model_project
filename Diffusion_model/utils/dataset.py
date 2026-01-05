@@ -32,7 +32,9 @@ class MicroFlowDataset(Dataset):
         self,
         root_dir: str,
         augment: bool = False,
-        use_3d: bool = False
+        use_3d: bool = False,
+        data: dict[str, torch.Tensor] = None,
+        save_stats: bool = True
     ):
         """
         Initialize dataset.
@@ -41,26 +43,37 @@ class MicroFlowDataset(Dataset):
             root_dir: directory where data is stored.
             augment: whether to augment the dataset by flipping the arrays.
             use_3d: whether to load 3D velocity data (stack of 2D slices).
+            data: optional dictionary of data tensors (if provided, skips loading from disk).
+            save_stats: whether to save statistics to json file.
         """
         self._download_url = 'https://zenodo.org/records/16940478/files/dataset.zip?download=1'
 
         self.root_dir = root_dir
         self.augment = augment
         self.use_3d = use_3d
+        self.save_stats = save_stats
 
         self.data: dict[str, torch.Tensor] = {}
 
-        # Download dataset if needed
-        if not osp.exists(self.root_dir):
-            # make directory if it doesn't exist
-            os.makedirs(self.root_dir)
-        
-        if os.listdir(self.root_dir) == []:
-            # if directory is empty, download dataset
-            self.download(url=self._download_url)
+        if data is not None:
+            self.data = data
+            if self.augment:
+                self._perform_augmentation()
+            
+            if self.save_stats:
+                self._save_statistics()
+        else:
+            # Download dataset if needed
+            if not osp.exists(self.root_dir):
+                # make directory if it doesn't exist
+                os.makedirs(self.root_dir)
+            
+            if os.listdir(self.root_dir) == []:
+                # if directory is empty, download dataset
+                self.download(url=self._download_url)
 
-        # Load dataset
-        self.process()
+            # Load dataset
+            self.process()
 
 
     def process(self):
@@ -154,9 +167,63 @@ class MicroFlowDataset(Dataset):
             self.data = _data_x
             print("Loaded simulations with flow in 'x' direction.")
 
-        if self.augment and not self.use_3d:
+        if self.augment:
+            self._perform_augmentation()
+        
+        # save statistics
+        if self.save_stats:
+            self._save_statistics()
+
+    def _perform_augmentation(self):
+        """Augment dataset by flipping arrays."""
+        if self.use_3d:
+            # 1. Flip along height/y-axis (Flip Y)
+            # Data shapes: (samples, num_slices, channels, H, W)
+            for key in self.data.keys():
+                if key in ['velocity', 'velocity_input']:
+                    # Flip H (dim -2) and invert vy (channel 1)
+                    flipped_y = torch.flip(self.data[key], dims=[-2])
+                    flipped_y[:, :, 1, :, :] = -flipped_y[:, :, 1, :, :] # Invert vy
+                    
+                    self.data[key] = torch.cat(
+                        (self.data[key], flipped_y)
+                    )
+                elif self.data[key].dim() >= 4: # Has spatial dims (microstructure, pressure)
+                    self.data[key] = torch.cat(
+                        (self.data[key], torch.flip(self.data[key], dims=[-2]))
+                    )
+                else: # No spatial dims (dxyz, permeability)
+                    self.data[key] = torch.cat(
+                        (self.data[key], self.data[key])
+                    )
+            
+            # 2. Flip along depth/z-axis (Flip Z) - applied to both original and Y-flipped data
+            for key in self.data.keys():
+                if key in ['velocity', 'velocity_input']:
+                    # Flip Z (dim 1) and invert vz (channel 2)
+                    flipped_z = torch.flip(self.data[key], dims=[1])
+                    flipped_z[:, :, 2, :, :] = -flipped_z[:, :, 2, :, :] # Invert vz
+                    
+                    self.data[key] = torch.cat(
+                        (self.data[key], flipped_z)
+                    )
+                elif self.data[key].dim() >= 4: # Has spatial dims (microstructure, pressure)
+                    # Flip Z (dim 1) - microstructure/pressure are scalar, so no sign inversion
+                    # Note: microstructure is (samples, num_slices, 1, H, W)
+                    self.data[key] = torch.cat(
+                        (self.data[key], torch.flip(self.data[key], dims=[1]))
+                    )
+                else: # No spatial dims (dxyz, permeability)
+                    self.data[key] = torch.cat(
+                        (self.data[key], self.data[key])
+                    )
+        else:
             # Flip (only for 2D data)
-            for key in meta_dict.keys():
+            # We need to know which keys are spatial.
+            # Assuming standard keys + optional ones.
+            # Or just check dimensions.
+            
+            for key in self.data.keys():
                 if key in ['microstructure', 'pressure']:
                     self.data[key] = torch.cat(
                         (self.data[key], torch.from_numpy(self.data[key].numpy()[:, :, ::-1, :].copy()))
@@ -168,13 +235,31 @@ class MicroFlowDataset(Dataset):
                     self.data[key] = torch.cat(
                         (self.data[key], tmp)
                     )
+                elif key == 'velocity_input': # Handle velocity_input if present in 2D
+                     # Assuming it follows velocity structure or similar
+                     # If it's 2D velocity input, it might need sign flip too if it has y-component
+                     # But usually velocity_input is just microstructure in 2D? No, it's U_2d.pt
+                     # If it has channels, we should check.
+                     # For now, assuming it's handled like velocity if it has 2 channels, or just flipped if 1.
+                     # Let's stick to safe logic: if it's spatial, flip.
+                     if self.data[key].dim() >= 3:
+                         # Check if it has channels that need sign flip?
+                         # For safety, let's just flip spatially for now unless we know it's vector field.
+                         # If it is U_2d.pt, it likely has vector components.
+                         # But let's assume standard keys for now as per original code.
+                         self.data[key] = torch.cat(
+                            (self.data[key], torch.flip(self.data[key], dims=[-2]))
+                        )
                 else:
-                    self.data[key] = torch.cat(
-                        (self.data[key], self.data[key])
-                    )
-        
-        # save statistics
-        self._save_statistics()
+                    # Non-spatial or unknown
+                    if self.data[key].dim() >= 3: # Heuristic for spatial
+                         self.data[key] = torch.cat(
+                            (self.data[key], torch.flip(self.data[key], dims=[-2]))
+                        )
+                    else:
+                        self.data[key] = torch.cat(
+                            (self.data[key], self.data[key])
+                        )
 
     def download(self, url: str):
         """
@@ -420,23 +505,50 @@ def get_loader(
     """
     generator = torch.Generator().manual_seed(seed) if seed is not None else seed
 
-    # Dataset
-    dataset = MicroFlowDataset(root_dir, augment=augment, use_3d=use_3d)
+    # Dataset - Load WITHOUT augmentation first
+    dataset = MicroFlowDataset(root_dir, augment=False, use_3d=use_3d)
+
+    def _create_subset_dataset(parent_dataset, indices, augment=False, save_stats=False):
+        new_data = {}
+        for key, tensor in parent_dataset.data.items():
+            new_data[key] = tensor[indices].clone()
+        
+        return MicroFlowDataset(
+            root_dir=parent_dataset.root_dir,
+            augment=augment,
+            use_3d=parent_dataset.use_3d,
+            data=new_data,
+            save_stats=save_stats
+        )
 
     # Split data: 70/15/15
     if k_folds is None:
-        train_size = int(train_ratio * len(dataset))
-        val_size = int(val_ratio * len(dataset))
-        test_size = len(dataset) - train_size - val_size
-        lengths = [train_size, val_size, test_size]
+        # Manual split to match VAE model's splitting logic (ensures same microstructures in sets)
+        import random
         
-        print(f"Dataset split: train={train_size}, val={val_size}, test={test_size} (total={len(dataset)})")
+        num_samples = len(dataset)
+        indices = list(range(num_samples))
+        
+        # Use Python's random with same seed as VAE to ensure identical split
+        rng = random.Random(seed)
+        rng.shuffle(indices)
+        
+        train_size = int(train_ratio * num_samples)
+        val_size = int(val_ratio * num_samples)
+        test_size = num_samples - train_size - val_size
+        
+        train_indices = indices[:train_size]
+        val_indices = indices[train_size:train_size + val_size]
+        test_indices = indices[train_size + val_size:]
+        
+        print(f"Dataset split: train={len(train_indices)}, val={len(val_indices)}, test={len(test_indices)} (total={num_samples})")
 
-        train_set, val_set, test_set = random_split(
-            dataset,
-            lengths,
-            generator=generator
-        )
+        # Create new datasets with augmentation ONLY for training
+        train_set = _create_subset_dataset(dataset, train_indices, augment=augment, save_stats=True)
+        val_set = _create_subset_dataset(dataset, val_indices, augment=False, save_stats=False)
+        test_set = _create_subset_dataset(dataset, test_indices, augment=False, save_stats=False)
+
+        print(f"Final dataset sizes (after augmentation): train={len(train_set)}, val={len(val_set)}, test={len(test_set)}")
 
         train_loader = DataLoader(
             dataset=train_set,
@@ -472,21 +584,24 @@ def get_loader(
         )
 
         out = []
+        # kf.split returns indices
         for i, (train_idx, test_idx) in enumerate(kf.split(dataset)):
+            
+            # Create datasets
+            train_set = _create_subset_dataset(dataset, train_idx, augment=augment, save_stats=True)
+            val_set = _create_subset_dataset(dataset, test_idx, augment=False, save_stats=False)
 
             train_loader = DataLoader(
-                dataset=dataset,
+                dataset=train_set,
                 batch_size=batch_size,
-                sampler=SubsetRandomSampler(train_idx, generator=generator),
                 num_workers=num_workers,
                 shuffle=shuffle,
                 pin_memory=pin_memory
             )
 
             val_loader = DataLoader(
-                dataset=dataset,
+                dataset=val_set,
                 batch_size=batch_size,
-                sampler=SubsetRandomSampler(test_idx, generator=generator),
                 num_workers=num_workers,
                 shuffle=False,
                 pin_memory=pin_memory
