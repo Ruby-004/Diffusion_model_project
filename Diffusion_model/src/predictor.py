@@ -121,12 +121,10 @@ class Predictor(ABC, nn.Module):
         predictor_type = param_dict['training']['predictor_type']
         predictor_kwargs = param_dict['training']['predictor']
 
-        if predictor_type == 'velocity':
-            predictor_class = VelocityPredictor
-        elif predictor_type == 'pressure':
-            predictor_class = PressurePredictor
+        if predictor_type == 'latent-diffusion':
+            predictor_class = LatentDiffusionPredictor
         else:
-            raise ValueError(f'Unknown predictor type: {predictor_type}')
+            raise ValueError(f'Unknown or unsupported predictor type: {predictor_type}')
 
         predictor = predictor_class(**predictor_kwargs)
         predictor.to(device)
@@ -176,215 +174,6 @@ class Predictor(ABC, nn.Module):
         return predictor
 
 
-class VelocityPredictor(Predictor):
-    """
-    Model for velocity field prediction in microstructures.
-    """
-    type: str = 'velocity'
-
-    def __init__(
-        self,
-        model_name='UNet',
-        model_kwargs: dict = {},
-        distance_transform = True,
-    ) -> None:
-        super().__init__(
-            model_name=model_name,
-            model_kwargs=model_kwargs,
-            distance_transform=distance_transform
-        )
-        print(f'Initialized {self.type} predictor with {self.trainable_params} parameters.')
-
-    def forward(self, img: torch.Tensor):
-        """
-        Forward pass for the model.
-
-        Args:
-            img: (binary) microstructure images with 1 in fluid areas and 0 in fiber areas. Shape: (batch, 1, height, width).
-        """
-
-        mask = img.clone()
-
-        feats = self.pre_process(img)
-        out = self.model(feats)
-
-        out = out * mask # multiply by mask
-
-        return out
-
-    def predict(self, img: torch.Tensor):
-        """
-        Predict velocity field from input microstructure images.
-
-        Args:
-            img: (binary) microstructure images with 1 in fluid areas and 0 in fiber areas. Shape: (batch, 1, height, width).
-        """
-
-        pred = self(img)
-        out = self.normalizer['output'].inverse(pred)
-        return out
-
-    def pre_process(self, img: torch.Tensor):
-        """
-        Pre-process inputs.
-
-        Args:
-            img: (binary) microstructure images with 1 in fluid areas and 0 in fiber areas. Shape: (batch, 1, height, width).
-        """
-        assert img.dim() == 4
-        assert img.shape[1] == 1 # only 1 channel
-
-        if self.distance_transform:
-            img = apply_distance_transform(img)
-
-        features = self.normalizer['input'](img)
-
-        return features
-
-
-class PressurePredictor(Predictor):
-    """
-    Model for pressure field prediction in microstructures.
-    """
-    type: str = 'pressure'
-
-    def __init__(
-        self,
-        model_name='UNet',
-        model_kwargs: dict = {},
-        distance_transform = False,
-    ) -> None:
-        super().__init__(
-            model_name=model_name,
-            model_kwargs=model_kwargs,
-            distance_transform=distance_transform
-        )
-        print(f'Initialized {self.type} predictor with {self.trainable_params} parameters.')
-
-    def forward(
-        self,
-        img: torch.Tensor,
-        x_length: torch.Tensor
-    ):
-        """
-        Forward pass for the model.
-
-        Args:
-            img: (binary) microstructure images with 1 in fluid areas and 0 in fiber areas. Shape: (batch, 1, height, width).
-            x_length: Microstructure (physical) length. Shape: (batch, 1) or (batch, 1, height, width).
-        """
-
-        mask = img.clone()
-
-        feats = self.pre_process(img, x_length)
-        out = self.model(feats)
-
-        out = out * mask # multiply by mask
-
-        return out
-
-    def predict(
-        self,
-        img: torch.Tensor,
-        x_length: torch.Tensor
-    ):
-        """
-        Predict pressure field from input microstructure images.
-        
-        Args:
-            img: (binary) microstructure images with 1 in fluid areas and 0 in fiber areas. Shape: (batch, 1, height, width).
-            x_length: Microstructure (physical) length. Shape: (batch, 1) or (batch, 1, height, width).
-        """
-
-        pred = self(img, x_length)
-        out = self.normalizer['output'].inverse(pred) # ρ-normalized pressure
-        return out
-    
-
-    def pre_process(
-        self,
-        img: torch.Tensor,
-        x_length: torch.Tensor
-    ):
-        """
-        Pre-process inputs.
-
-        Args:
-            img: (binary) microstructure images with 1 in fluid areas and 0 in fiber areas. Shape: (batch, 1, height, width).
-            x_length: Microstructure (physical) length. Shape: (batch, 1) or (batch, 1, height, width).
-        """
-
-        x_length = self._process_microstructure_length(x_length, img.shape)
-        assert img.dim() == 4
-        assert x_length.dim() == 4
-        img_copy = img.clone()
-
-        if self.distance_transform:
-            img = apply_distance_transform(img)
-
-        features = torch.cat(
-            (img, x_length),
-            dim=1
-        ) # shape: (samples, 2, height, width)
-
-        features = self.normalizer['input'](features)
-
-
-        """Additional modifications"""
-
-        # multiply microstructure by fiber volume fraction
-        fiber_vf = self._compute_fiber_vf(img_copy)
-        features[:, [0]] = features[:, [0]] * fiber_vf
-
-        # use inverse of microstructure length
-        features[:, [1]] = 1 / features[:, [1]]
-
-        return features
-
-
-    @staticmethod
-    def _process_microstructure_length(
-        x_length: torch.Tensor,
-        shape: tuple
-    ):
-        """
-        Evaluate whether microstructures' length is passed as scalars or matrices. Returns a 4D tensor.
-        
-        Args:
-            x_length: microstructure (physical) length.
-            shape: shape (samples, 1, height, width) of microstructure images. Used to expand `x_length` if needed.
-        """
-        if x_length.dim() == 4:
-            # shape: (samples, 1, height, width)
-            pass
-        else:
-            x_length = x_length.squeeze() # shape: (samples,)
-            x_length = x_length.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1) # shape: (samples, 1, 1, 1)
-            x_length = x_length * torch.ones(shape, device=x_length.device)
-
-        return x_length
-
-    @staticmethod
-    def _compute_fiber_vf(img: torch.Tensor):
-        """
-        Compute fiber volume fraction
-
-        Args:
-            img: (binary) microstructure images with 1 in fluid areas and 0 in fiber areas. Shape: (batch, 1, height, width).
-        """
-
-        fluid_vf = torch.sum(
-            img,
-            dim=[-1,-2]
-        ) / (img.shape[-1] * img.shape[-2])
-
-        fiber_vf = 1 - fluid_vf
-        fiber_vf = fiber_vf.unsqueeze(-1).unsqueeze(-1) # shape: (samples, 1, height, width)
-
-        return fiber_vf
-        
-
-
 class LatentDiffusionPredictor(Predictor):
     """
     Model for 3D velocity field prediction using one-step diffusion in VAE latent space.
@@ -428,10 +217,11 @@ class LatentDiffusionPredictor(Predictor):
             vae_path = osp.join(project_root, vae_path)
         
         # Load VAE with correct architecture (3 input channels from velocity only)
+        # Use latent_channels from model_kwargs if provided (should match output channels)
         self.vae = VariationalAutoencoder.from_directory(
             vae_path, 
             in_channels=3,  # 3 channels: velocity (vx, vy, vz)
-            latent_channels=4
+            latent_channels=latent_channels
         )
         
         # Freeze VAE parameters

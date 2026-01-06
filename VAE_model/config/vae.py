@@ -26,7 +26,7 @@ parser.add_argument(
 parser.add_argument(
     '--latent-channels',
     type=int,
-    default=4,
+    default=16,
     help='Number of channels in latent space.'
 )
 parser.add_argument(

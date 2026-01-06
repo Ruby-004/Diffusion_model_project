@@ -12,7 +12,7 @@ from optuna.trial import Trial
 from utils.dataset import get_loader
 from src.helper import set_model, run_epoch
 from src.unet.metrics import cost_function
-from src.predictor import VelocityPredictor, PressurePredictor, LatentDiffusionPredictor
+from src.predictor import LatentDiffusionPredictor
 
 from config import parser, process_args, make_log_folder
 
@@ -129,10 +129,10 @@ def train(
         
         from src.helper import select_input_output
         
-        if isinstance(predictor, (VelocityPredictor, PressurePredictor)):
-            option = 'velocity' if isinstance(predictor, VelocityPredictor) else 'pressure'
-        else:
+        if isinstance(predictor, LatentDiffusionPredictor):
             option = 'latent-diffusion'
+        else:
+            raise ValueError(f"Unknown predictor:  {type(predictor)}")
         
         test_loss = 0
         num_test_batch = len(test_loader)

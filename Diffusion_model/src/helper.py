@@ -7,13 +7,13 @@ import torch
 from torch.utils.data import DataLoader
 import torch.optim as optim
 
-from src.predictor import VelocityPredictor, PressurePredictor, LatentDiffusionPredictor
+from src.predictor import LatentDiffusionPredictor
 from utils.zenodo import download_data, unzip_data, is_url
 
 
 def get_norm_params(
     file: str,
-    option: Literal['velocity', 'pressure', 'latent-diffusion']
+    option: Literal['latent-diffusion']
 ):
     """
     Retrieve normalization parameters for dataset.
@@ -24,24 +24,7 @@ def get_norm_params(
 
     stats = json.load(open(file))
 
-    if option == 'velocity':
-        max_velocity = stats['U']['max']
-
-        out = {
-            'input': None,
-            'output': (max_velocity, max_velocity)
-        }
-
-    elif option == 'pressure':
-        max_length = stats['dxyz']['max']
-        max_pressure = stats['p']['max']
-
-        out = {
-            'input': (1, max_length),
-            'output': (max_pressure,)
-        }
-    
-    elif option == 'latent-diffusion':
+    if option == 'latent-diffusion':
         # Try to get max velocity from either 'U' or 'velocity' key
         if 'U' in stats:
             max_velocity = stats['U']['max']
@@ -67,22 +50,22 @@ def get_norm_params(
             'input': None,
             'output': (max_velocity, max_velocity, max_velocity)  # 3 channels: vx, vy, vz
         }
+    else:
+        raise ValueError(f'Unknown option: {option}')
 
     return out
 
 
 def set_model(
-    type: Literal['velocity', 'pressure', 'latent-diffusion'],
+    type: Literal['latent-diffusion'],
     kwargs: dict,
     norm_file: str
 ):
 
-    if type=='velocity':
-        predictor = VelocityPredictor(**kwargs)
-    elif type=='pressure':
-        predictor = PressurePredictor(**kwargs)
-    elif type=='latent-diffusion':
+    if type=='latent-diffusion':
         predictor = LatentDiffusionPredictor(**kwargs)
+    else:
+        raise ValueError(f'Unknown model type: {type}')
 
     norm_params = get_norm_params(
         file=norm_file,
@@ -94,7 +77,7 @@ def set_model(
 
 
 def get_model(
-    type: Literal['velocity', 'pressure', 'latent-diffusion'],
+    type: Literal['latent-diffusion'],
     kwargs: dict,
     model_path: str,
     device: str = None
@@ -103,12 +86,10 @@ def get_model(
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     
-    if type=='velocity':
-        predictor = VelocityPredictor(**kwargs)
-    elif type=='pressure':
-        predictor = PressurePredictor(**kwargs)
-    elif type=='latent-diffusion':
+    if type=='latent-diffusion':
         predictor = LatentDiffusionPredictor(**kwargs)
+    else:
+        raise ValueError(f'Unknown model type: {type}')
 
     predictor.to(device)
 
@@ -123,7 +104,7 @@ def get_model(
 
 def select_input_output(
     data: dict[str, torch.Tensor],
-    option: Literal['velocity', 'pressure', 'latent-diffusion'],
+    option: Literal['latent-diffusion'],
     device: str
 ) -> tuple[list[torch.Tensor], torch.Tensor]:
     """
@@ -135,22 +116,7 @@ def select_input_output(
         device: device on which to put data.
     """
     
-    imgs = data['microstructure'].to(device)
-
-    if option=='velocity':
-
-        input = (imgs,)
-        targets = data['velocity'].to(device)
-        
-    elif option=='pressure':
-        
-        dxyz = data['dxyz'].to(device)
-        x_length = dxyz[:, 0]
-        
-        input = (imgs, x_length)
-        targets = data['pressure'].to(device)
-    
-    elif option=='latent-diffusion':
+    if option=='latent-diffusion':
         # For latent diffusion: input is 2D velocity (U_2d), target is 3D velocity (U)
         # Microstructure used as mask - shape: (batch, num_slices, 1, H, W)
         imgs = data['microstructure'].to(device)  # Shape: (batch, num_slices, 1, H, W)
@@ -158,13 +124,15 @@ def select_input_output(
         
         input = (imgs, velocity_2d)
         targets = data['velocity'].to(device)  # Shape: (batch, num_slices, 3, H, W)
+    else:
+        raise ValueError(f'Unknown option: {option}')
 
     return input, targets
 
 
 def run_epoch(
     loaders: tuple[DataLoader, DataLoader],
-    predictor: Union[VelocityPredictor, PressurePredictor, LatentDiffusionPredictor],
+    predictor: Union[LatentDiffusionPredictor],
     optimizer: optim.Optimizer,
     criterion: Callable[..., torch.Tensor],
     device: str = 'cuda'
@@ -184,12 +152,10 @@ def run_epoch(
     num_train_batch = len(train_loader)
     num_val_batch = len(val_loader)
 
-    if isinstance(predictor, VelocityPredictor):
-        option = 'velocity'
-    elif isinstance(predictor, PressurePredictor):
-        option = 'pressure'
-    elif isinstance(predictor, LatentDiffusionPredictor):
+    if isinstance(predictor, LatentDiffusionPredictor):
         option = 'latent-diffusion'
+    else:
+        raise ValueError(f'Unknown predictor type: {type(predictor)}')
 
     """1. Training Set"""
     predictor.train()
@@ -218,12 +184,7 @@ def run_epoch(
             # Loss in latent space (no normalization needed, already in latent)
             loss = criterion(output=preds, target=target_latents)
         else:
-            preds = predictor(*input)
-
-            # normalize targets
-            targets = predictor.normalizer['output'](targets)
-
-            loss = criterion(output=preds, target=targets)
+            raise ValueError(f"Unknown option: {option}")
 
         optimizer.zero_grad()
         loss.backward()
@@ -262,12 +223,7 @@ def run_epoch(
                 # Loss in latent space
                 loss = criterion(output=preds, target=target_latents)
             else:
-                preds = predictor(*input)
-
-                # normalize targets
-                targets = predictor.normalizer['output'](targets)
-
-                loss = criterion(output=preds, target=targets)
+                raise ValueError(f"Unknown option: {option}")
             
             val_loss += loss.item()
 

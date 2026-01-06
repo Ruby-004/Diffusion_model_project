@@ -125,8 +125,8 @@ group_train.add_argument(
 group_train.add_argument(
     '--predictor-type',
     type=str,
-    default='velocity',
-    choices=['velocity', 'pressure', 'latent-diffusion'],
+    default='latent-diffusion',
+    choices=['latent-diffusion'],
     help='Type of ML predictor (for the velocity or pressure field)'
 )
 group_train.add_argument(
