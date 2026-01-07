@@ -47,6 +47,7 @@ def train(
     scheduler_kwargs = train_dict['scheduler']
     num_epochs = train_dict['num_epochs']
     cost_function_name = train_dict['cost_function']
+    lambda_div = train_dict.get('lambda_div', 0.0)
     predictor_type = train_dict['predictor_type']
     predictor_kwargs = train_dict['predictor']
     
@@ -84,7 +85,8 @@ def train(
             predictor=predictor,
             optimizer=optimizer,
             criterion=criterion,
-            device=device
+            device=device,
+            lambda_div=lambda_div
         )
         dtime = time.time() - start_time
 

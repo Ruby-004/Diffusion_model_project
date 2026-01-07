@@ -118,8 +118,14 @@ group_train.add_argument(
     '--cost-function',
     type=str,
     default='normalized_mae_loss',
-    choices=['normalized_mae_loss', 'mae_loss'],
+    choices=['normalized_mae_loss', 'mae_loss', 'mse_loss', 'huber_loss'],
     help='Cost function for training.'
+)
+group_train.add_argument(
+    '--lambda-div',
+    type=float,
+    default=0.0,
+    help='Weight for divergence constraint loss (physics-based penalty).'
 )
 
 group_train.add_argument(
@@ -309,6 +315,7 @@ def process_args(args: argparse.Namespace):
             },
             'num_epochs': args.num_epochs,
             'cost_function': args.cost_function,
+            'lambda_div': args.lambda_div,
             'predictor_type': args.predictor_type,
             'predictor': {
                 'model_name':args.model_name,

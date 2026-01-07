@@ -7,13 +7,55 @@ from torch import linalg
 __all__ = [
     'cost_function',
     'mae_loss',
-    'normalized_mae_loss'
+    'mse_loss',
+    'huber_loss',
+    'normalized_mae_loss',
+    'divergence_loss'
 ]
 
 
 def cost_function(name: str) -> Callable[..., torch.Tensor]:
     func = eval(name)
     return func
+
+
+def mse_loss(
+    output: torch.Tensor,
+    target: torch.Tensor,
+    reduce=True
+) -> torch.Tensor:
+    """
+    Mean Squared Error.
+    """
+    dim = (-3,-2,-1) # everything except batch dimension
+    loss = torch.mean(
+        (output - target)**2,
+        dim=dim
+    )
+    if reduce:
+        loss = loss.mean()
+    return loss
+
+
+def huber_loss(
+    output: torch.Tensor,
+    target: torch.Tensor,
+    reduce=True,
+    delta=1.0
+) -> torch.Tensor:
+    """
+    Huber Loss.
+    """
+    # PyTorch's F.huber_loss reduction is 'mean' or 'sum' by default over all elements.
+    # To match the behavior of other losses here (reduce over batch at the end), we can use elementwise.
+    loss = torch.nn.functional.huber_loss(output, target, reduction='none', delta=delta)
+    
+    dim = (-3,-2,-1)
+    loss = torch.mean(loss, dim=dim)
+    
+    if reduce:
+        loss = loss.mean()
+    return loss
 
 
 def mae_loss(
@@ -275,3 +317,41 @@ def _get_flow_rate(
     flow_rate = flow_rate.squeeze()
 
     return flow_rate
+
+
+def divergence_loss(
+    flow_field: torch.Tensor
+) -> torch.Tensor:
+    """
+    Calculate divergence loss for a flow field.
+    
+    `flow_field`: (B, 3, D, H, W) tensor representing (u, v, w) velocity components.
+    """
+    assert flow_field.dim() == 5, f"Expected 5D tensor, got {flow_field.dim()}D"
+    assert flow_field.shape[1] == 3, f"Expected 3 channels (u, v, w), got {flow_field.shape[1]}"
+
+    u = flow_field[:, 0, :, :, :]
+    v = flow_field[:, 1, :, :, :]
+    w = flow_field[:, 2, :, :, :]
+
+    # Compute gradients (central differences)
+    # torch.gradient computes the gradient along the given dimension
+    # spacing=1.0 assumed
+    
+    # du/dx (width is last dim)
+    du_dx = torch.gradient(u, dim=-1)[0]
+    
+    # dv/dy (height is 2nd to last)
+    dv_dy = torch.gradient(v, dim=-2)[0]
+    
+    # dw/dz (depth is 3rd to last)
+    dw_dz = torch.gradient(w, dim=-3)[0]
+
+    div = du_dx + dv_dy + dw_dz
+    
+    # L_div = || div ||^2
+    # Mean over spatial dims, mean over batch
+    loss = torch.mean(div**2)
+    
+    return loss
+

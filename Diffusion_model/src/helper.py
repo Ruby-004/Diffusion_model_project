@@ -8,6 +8,7 @@ from torch.utils.data import DataLoader
 import torch.optim as optim
 
 from src.predictor import LatentDiffusionPredictor
+from src.unet.metrics import divergence_loss
 from utils.zenodo import download_data, unzip_data, is_url
 
 
@@ -135,7 +136,8 @@ def run_epoch(
     predictor: Union[LatentDiffusionPredictor],
     optimizer: optim.Optimizer,
     criterion: Callable[..., torch.Tensor],
-    device: str = 'cuda'
+    device: str = 'cuda',
+    lambda_div: float = 0.0
 ):
     """
     Optimize model for 1 epoch over training set, then evaluate over validation set.
@@ -183,6 +185,20 @@ def run_epoch(
             
             # Loss in latent space (no normalization needed, already in latent)
             loss = criterion(output=preds, target=target_latents)
+
+            # Physics constraint: Divergence Loss
+            if lambda_div > 0.0:
+                # Decode predicted latents to 3D velocity field for physics constraint
+                # preds shape: (batch, latent_depth, latent_channels, latent_h, latent_w)
+                # VAE decode expects: (batch, latent_channels, latent_depth, latent_h, latent_w)
+                latents_for_decode = preds.permute(0, 2, 1, 3, 4)
+                
+                # Decode using VAE (gradients flow through decoder ops to latents)
+                decoded_velocity = predictor.vae.decode(latents_for_decode) # (batch, 3, num_slices, H, W)
+                
+                div_l = divergence_loss(decoded_velocity)
+                loss = loss + lambda_div * div_l
+
         else:
             raise ValueError(f"Unknown option: {option}")
 
@@ -222,6 +238,14 @@ def run_epoch(
                 
                 # Loss in latent space
                 loss = criterion(output=preds, target=target_latents)
+
+                # Physics constraint: Divergence Loss
+                if lambda_div > 0.0:
+                    latents_for_decode = preds.permute(0, 2, 1, 3, 4)
+                    decoded_velocity = predictor.vae.decode(latents_for_decode)
+                    div_l = divergence_loss(decoded_velocity)
+                    loss = loss + lambda_div * div_l
+
             else:
                 raise ValueError(f"Unknown option: {option}")
             
