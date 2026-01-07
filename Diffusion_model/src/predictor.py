@@ -176,8 +176,7 @@ class Predictor(ABC, nn.Module):
 
 class LatentDiffusionPredictor(Predictor):
     """
-    Model for 3D velocity field prediction using one-step diffusion in VAE latent space.
-    Takes 2D microstructure as input, predicts 3D flow (stack of 2D slices) in latent space.
+    Model for 3D velocity field prediction using multi-step diffusion in VAE latent space.
     """
     type: str = 'latent-diffusion'
 
@@ -189,6 +188,14 @@ class LatentDiffusionPredictor(Predictor):
         vae_path: str = None,
         num_slices: int = 10,
     ) -> None:
+        
+        # Helper imports
+        from .diffusion import DiffusionScheduler
+
+        # Add time embedding dimension to model kwargs if not present
+        if 'time_embedding_dim' not in model_kwargs:
+            model_kwargs['time_embedding_dim'] = 64
+            
         super().__init__(
             model_name=model_name,
             model_kwargs=model_kwargs,
@@ -196,6 +203,11 @@ class LatentDiffusionPredictor(Predictor):
         )
         
         self.num_slices = num_slices
+        self.num_timesteps = 1000
+        
+        # Init scheduler
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.scheduler = DiffusionScheduler(num_timesteps=self.num_timesteps, device=device)
         
         # Override normalizer for latent diffusion:
         # - Input: 1 channel (binary microstructure)
@@ -231,20 +243,18 @@ class LatentDiffusionPredictor(Predictor):
         
         print(f'Initialized {self.type} predictor with {self.trainable_params} parameters.')
         print(f'Loaded VAE from {vae_path} (frozen).')
-
-    def forward(self, img: torch.Tensor, velocity_2d: torch.Tensor, noise: torch.Tensor = None):
-        """
-        Forward pass for one-step diffusion model in latent space.
-
-        Args:
-            img: (binary) microstructure images with 1 in fluid areas and 0 in fiber areas. 
-                 Shape: (batch, num_slices, 1, height, width) for 3D case.
-            velocity_2d: 2D velocity input (where vz=0). Shape: (batch, num_slices, 3, H, W)
-            noise: Optional noise for training. If None, uses random noise.
-                 Shape: (batch, num_slices, latent_channels, latent_height, latent_width).
         
-        Returns:
-            predicted_latents: Shape (batch, num_slices, latent_channels, latent_height, latent_width)
+    def to(self, device):
+        super().to(device)
+        self.scheduler.to(device)
+        return self
+
+    def forward(self, img: torch.Tensor, velocity_2d: torch.Tensor, x_start: torch.Tensor = None, noise: torch.Tensor = None):
+        """
+        Forward pass for multi-step diffusion model in latent space.
+        
+        Args:
+            x_start: Target latents (clean data). Required for training step.
         """
 
         batch_size = img.shape[0]
@@ -262,10 +272,6 @@ class LatentDiffusionPredictor(Predictor):
             latent_channels = latent_shape[1]
             latent_depth = latent_shape[2]
             latent_h, latent_w = latent_shape[3], latent_shape[4]
-        
-        # Generate or use provided noise  
-        if noise is None:
-            noise = torch.randn(batch_size, latent_depth, latent_channels, latent_h, latent_w).to(device)
         
         # Encode velocity_2d to latent space to use as conditioning
         # Permute to (batch, channels, num_slices, H, W) for 3D VAE
@@ -298,7 +304,7 @@ class LatentDiffusionPredictor(Predictor):
         )  # (batch*num_slices, 1, latent_h, latent_w)
         
         # Flatten latents: (batch * latent_depth, latent_channels, latent_h, latent_w)
-        noise_flat = noise.reshape(batch_size * latent_depth, latent_channels, latent_h, latent_w)
+        # noise_flat = noise.reshape(batch_size * latent_depth, latent_channels, latent_h, latent_w) # We don't have noise here yet
         velocity_2d_latent_flat = velocity_2d_latent.reshape(batch_size * latent_depth, latent_channels, latent_h, latent_w)
         
         # Repeat microstructure features to match latent depth
@@ -324,52 +330,109 @@ class LatentDiffusionPredictor(Predictor):
         feats_latent_flat = feats_3d_interp.reshape(batch_size * latent_depth, 1, latent_h, latent_w)
         mask_latent_flat = mask_3d_interp.reshape(batch_size * latent_depth, 1, latent_h, latent_w)
         
-        # Concatenate: noise + velocity_2d_latent + microstructure_features
-        # Shape: (batch * latent_depth, latent_channels*2 + 1, latent_h, latent_w)
-        unet_input = torch.cat([noise_flat, velocity_2d_latent_flat, feats_latent_flat], dim=1)
+        # Training Logic
+        if x_start is not None:
+             # Flatten x_start to match latent_depth
+             # x_start shape from encode_target: (batch, latent_depth, latent_channels, H, W)
+             x_start_flat = x_start.reshape(batch_size * latent_depth, latent_channels, latent_h, latent_w)
+             
+             if noise is None:
+                 noise = torch.randn_like(x_start_flat)
+             else:
+                 # Ensure noise is also flattened
+                 noise = noise.reshape(batch_size * latent_depth, latent_channels, latent_h, latent_w)
+                 
+             # Sample timesteps
+             t = torch.randint(0, self.num_timesteps, (batch_size * latent_depth,), device=device).long()
+             
+             # Add noise
+             self.scheduler.to(device)
+             x_t = self.scheduler.q_sample(x_start_flat, t, noise)
+             
+             # Network Input: Concatenate Noisy Latent + Conditioning
+             unet_input = torch.cat([x_t, velocity_2d_latent_flat, feats_latent_flat], dim=1)
+             
+             # Predict noise
+             noise_pred = self.model(unet_input, t)
+             
+             return noise_pred, noise
         
-        # Predict denoised latent (one-step: predict clean 3D velocity latent from noise + 2D velocity)
-        predicted_latent_flat = self.model(unet_input)
-        
-        # Apply mask in latent space (zero out solid regions)
-        predicted_latent_flat = predicted_latent_flat * mask_latent_flat
-        
-        # Reshape back to 3D: (batch, latent_depth, latent_channels, latent_h, latent_w)
-        predicted_latents = predicted_latent_flat.reshape(batch_size, latent_depth, latent_channels, latent_h, latent_w)
-        
-        return predicted_latents
+        else:
+             raise ValueError("forward() requires x_start (target latents) for training. Use predict() for inference.")
+
 
     def predict(self, img: torch.Tensor, velocity_2d: torch.Tensor, noise: torch.Tensor = None):
         """
-        Predict 3D velocity field from 2D velocity input and microstructure.
-
-        Args:
-            img: (binary) microstructure images. Shape: (batch, num_slices, 1, height, width).
-            velocity_2d: 2D velocity input. Shape: (batch, num_slices, 3, H, W)
-            noise: Optional starting noise. If None, uses random noise.
-        
-        Returns:
-            velocity_3d: Predicted 3D velocity field. Shape: (batch, num_slices, 3, height, width)
+        Predict 3D velocity field using iterative denoising.
         """
+        batch_size = img.shape[0]
+        device = img.device
+        num_slices = velocity_2d.shape[1]
         
-        # Get predicted latents: (batch, latent_depth, latent_channels, latent_h, latent_w)
-        predicted_latents = self(img, velocity_2d, noise)
+        img_flat = img.view(batch_size * num_slices, 1, img.shape[3], img.shape[4])
         
-        batch_size = predicted_latents.shape[0]
-        latent_depth = predicted_latents.shape[1]
+        # Get dimensions
+        with torch.no_grad():
+             dummy_5d = torch.zeros(1, 3, num_slices, img.shape[3], img.shape[4]).to(device)
+             latent_shape = self.vae.encoder(dummy_5d)[0].shape
+             latent_channels = latent_shape[1]
+             latent_depth = latent_shape[2]
+             latent_h, latent_w = latent_shape[3], latent_shape[4]
+             
+        # Prepare conditioning (Copy from forward)
+        velocity_2d_permuted = velocity_2d.permute(0, 2, 1, 3, 4)
+        with torch.no_grad():
+            velocity_2d_latent_5d, _ = self.vae.encode(velocity_2d_permuted)
+        velocity_2d_latent = velocity_2d_latent_5d.permute(0, 2, 1, 3, 4)
         
-        # Decode using 3D VAE
-        # Permute to (batch, latent_channels, latent_depth, latent_h, latent_w) for VAE decoder
+        feats_flat = self.pre_process(img_flat)
+        feats_downsampled = torch.nn.functional.interpolate(feats_flat, size=(latent_h, latent_w), mode='bilinear', align_corners=False)
+        
+        velocity_2d_latent_flat = velocity_2d_latent.reshape(batch_size * latent_depth, latent_channels, latent_h, latent_w)
+        
+        feats_3d = feats_downsampled.reshape(batch_size, num_slices, 1, latent_h, latent_w)
+        feats_3d_interp = torch.nn.functional.interpolate(
+            feats_3d.permute(0, 2, 1, 3, 4),
+            size=(latent_depth, latent_h, latent_w),
+            mode='trilinear',
+            align_corners=False
+        ).permute(0, 2, 1, 3, 4)
+        feats_latent_flat = feats_3d_interp.reshape(batch_size * latent_depth, 1, latent_h, latent_w)
+        
+        # Sampling Loop
+        if noise is None:
+            noise = torch.randn(batch_size * latent_depth, latent_channels, latent_h, latent_w, device=device)
+        else:
+            noise = noise.reshape(batch_size * latent_depth, latent_channels, latent_h, latent_w)
+            
+        x = noise
+        self.scheduler.to(device)
+        
+        for t in reversed(range(0, self.num_timesteps)):
+             t_batch = torch.full((batch_size * latent_depth,), t, device=device, dtype=torch.long)
+             
+             unet_input = torch.cat([x, velocity_2d_latent_flat, feats_latent_flat], dim=1)
+             
+             # Predict noise
+             with torch.no_grad():
+                  noise_pred = self.model(unet_input, t_batch)
+             
+             # Step
+             x = self.scheduler.p_sample(noise_pred, x, t)
+        
+        predicted_latent_flat = x
+        
+        # Decode
+        predicted_latents = predicted_latent_flat.reshape(batch_size, latent_depth, latent_channels, latent_h, latent_w)
         predicted_latents_5d = predicted_latents.permute(0, 2, 1, 3, 4)
         
         with torch.no_grad():
-            # Decode: (batch, 3, num_slices, H, W) <- note VAE upsamples depth dimension
             velocity_5d = self.vae.decode(predicted_latents_5d)
         
         # Permute back to (batch, num_slices, 3, H, W)
         velocity_3d = velocity_5d.permute(0, 2, 1, 3, 4)
         
-        # Denormalize - reshape to 4D for normalizer
+        # Denormalize
         batch, depth, channels, height, width = velocity_3d.shape
         velocity_flat = velocity_3d.reshape(batch * depth, channels, height, width)
         velocity_flat = self.normalizer['output'].inverse(velocity_flat)

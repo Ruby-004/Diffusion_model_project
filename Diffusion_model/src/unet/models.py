@@ -1,4 +1,5 @@
 from typing import Literal
+import math
 
 import torch
 import torch.nn as nn
@@ -8,6 +9,21 @@ from .blocks import zero_module, get_padding
 
 
 _activ_type = Literal['silu', 'relu', 'leakyrelu','softplus']
+
+
+class SinusoidalPositionalEmbeddings(nn.Module):
+    def __init__(self, dim: int):
+        super().__init__()
+        self.dim = dim
+
+    def forward(self, time: torch.Tensor):
+        device = time.device
+        half_dim = self.dim // 2
+        embeddings = math.log(10000) / (half_dim - 1)
+        embeddings = torch.exp(torch.arange(half_dim, device=device) * -embeddings)
+        embeddings = time[:, None] * embeddings[None, :]
+        embeddings = torch.cat((embeddings.sin(), embeddings.cos()), dim=-1)
+        return embeddings
 
 
 class UNet(nn.Module):
@@ -25,7 +41,8 @@ class UNet(nn.Module):
         activation: _activ_type = 'silu',
         final_activation: _activ_type = None,
         attention: str = '',
-        dropout: float = 0.0
+        dropout: float = 0.0,
+        time_embedding_dim: int = None
     ) -> None:
         super().__init__()
 
@@ -35,6 +52,7 @@ class UNet(nn.Module):
         self.kernel_size: int = kernel_size
         self.padding_mode: str = padding_mode
         self.dropout = dropout
+        self.time_embedding_dim = time_embedding_dim
         
         self._activation = activation
         self.activation = activation_function(activation)
@@ -51,6 +69,18 @@ class UNet(nn.Module):
 
         self._padding = get_padding(self.kernel_size)
 
+        # Time embedding
+        self.time_mlp = None
+        block_time_dim = None
+        if time_embedding_dim is not None:
+            self.time_pos_emb = SinusoidalPositionalEmbeddings(time_embedding_dim)
+            block_time_dim = time_embedding_dim * 4
+            self.time_mlp = nn.Sequential(
+                nn.Linear(time_embedding_dim, block_time_dim),
+                self.activation,
+                nn.Linear(block_time_dim, block_time_dim),
+            )
+
         """Model components"""
         # encoder
         self.encoder = build_encoder(
@@ -59,7 +89,8 @@ class UNet(nn.Module):
             kernel_size=self.kernel_size,
             padding_mode=self.padding_mode,
             activation=self.activation,
-            dropout=self.dropout
+            dropout=self.dropout,
+            time_emb_dim=block_time_dim
         )
 
         # bottleneck
@@ -70,7 +101,8 @@ class UNet(nn.Module):
             kernel_size=self.kernel_size,
             padding_mode=self.padding_mode,
             activation=self.activation,
-            dropout=self.dropout
+            dropout=self.dropout,
+            time_emb_dim=block_time_dim
         )
 
         # decoder
@@ -80,7 +112,8 @@ class UNet(nn.Module):
             kernel_size=self.kernel_size,
             padding_mode=self.padding_mode,
             activation=self.activation,
-            dropout=self.dropout
+            dropout=self.dropout,
+            time_emb_dim=block_time_dim
         )
 
         # output part
@@ -95,12 +128,19 @@ class UNet(nn.Module):
         )
 
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, time: torch.Tensor = None):
         """
         `x`: input with shape: (batch, channels, height, width).
+        `time`: time steps with shape: (batch,).
         """
 
-        
+        time_emb = None
+        if self.time_mlp is not None:
+            if time is None:
+                raise ValueError("Model requires time input but None was provided")
+            t_emb = self.time_pos_emb(time)
+            time_emb = self.time_mlp(t_emb)
+
         """Encoder"""
         skip_connections: list[torch.Tensor] = []
 
@@ -110,7 +150,7 @@ class UNet(nn.Module):
 
             conv_block, attn_block, pool_layer = module_list
 
-            x = conv_block(x) # convolution
+            x = conv_block(x, time_emb) # convolution
 
             if attn_block is not None:
                 x = attn_block(x) # attention
@@ -120,7 +160,7 @@ class UNet(nn.Module):
 
 
         """Bottleneck"""
-        x = self.bottleneck(x)
+        x = self.bottleneck(x, time_emb)
 
         
         """Decoder"""
@@ -135,7 +175,7 @@ class UNet(nn.Module):
             x = up_conv(x) # up-sampling
 
             x = torch.cat((skip, x), dim=1)
-            x = conv_block(x) # convolution
+            x = conv_block(x, time_emb) # convolution
 
             if attn_block is not None:
                 x = attn_block(x) # attention
@@ -155,7 +195,8 @@ def build_encoder(
     kernel_size: int,
     padding_mode: str,
     activation: nn.Module,
-    dropout: float = 0.0
+    dropout: float = 0.0,
+    time_emb_dim: int = None
 ) -> nn.ModuleList:
     """
     Build encoder part of U-Net.
@@ -176,7 +217,8 @@ def build_encoder(
             kernel_size=kernel_size,
             padding_mode=padding_mode,
             activation=activation,
-            dropout=dropout
+            dropout=dropout,
+            time_emb_dim=time_emb_dim
         )
         
         # Attention block
@@ -210,7 +252,8 @@ def build_decoder(
     kernel_size: int,
     padding_mode: str,
     activation: nn.Module,
-    dropout: float = 0.0
+    dropout: float = 0.0,
+    time_emb_dim: int = None
 ) -> nn.ModuleList:
     """
     Build decoder part of U-Net.
@@ -239,7 +282,8 @@ def build_decoder(
             kernel_size=kernel_size,
             padding_mode=padding_mode,
             activation=activation,
-            dropout=dropout
+            dropout=dropout,
+            time_emb_dim=time_emb_dim
         )
         
         # Attention block

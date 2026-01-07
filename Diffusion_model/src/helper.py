@@ -177,24 +177,19 @@ def run_epoch(
             # Encode 3D velocity target to latent space using 2D velocity for VAE
             target_latents = predictor.encode_target(targets, velocity_2d)
             
-            # Predict denoised latent (one-step: predict clean 3D from noise + 2D velocity)
-            preds = predictor(img, velocity_2d)
+            # Predict noise (Multi-step training)
+            # Pass x_start to trigger training logic
+            noise = torch.randn_like(target_latents)
+            preds, target_noise = predictor(img, velocity_2d, x_start=target_latents, noise=noise)
             
-            # Loss in latent space (no normalization needed, already in latent)
-            loss = criterion(output=preds, target=target_latents)
+            # Loss in latent space (noise prediction)
+            loss = criterion(output=preds, target=target_noise)
 
             # Physics constraint: Divergence Loss
             if lambda_div > 0.0:
-                # Decode predicted latents to 3D velocity field for physics constraint
-                # preds shape: (batch, latent_depth, latent_channels, latent_h, latent_w)
-                # VAE decode expects: (batch, latent_channels, latent_depth, latent_h, latent_w)
-                latents_for_decode = preds.permute(0, 2, 1, 3, 4)
-                
-                # Decode using VAE (gradients flow through decoder ops to latents)
-                decoded_velocity = predictor.vae.decode(latents_for_decode) # (batch, 3, num_slices, H, W)
-                
-                div_l = divergence_loss(decoded_velocity)
-                loss = loss + lambda_div * div_l
+                # Note: Divergence loss requires resonstructing x_0 from predicted noise.
+                # Skipping for now in multi-step implementation.
+                pass
 
         else:
             raise ValueError(f"Unknown option: {option}")
@@ -227,21 +222,17 @@ def run_epoch(
                 # Encode target to latent space
                 target_latents = predictor.encode_target(targets, velocity_2d)
                 
-                # Generate random noise
+                # Predict noise (Multi-step validation)
+                # Pass x_start to trigger training logic
                 noise = torch.randn_like(target_latents)
+                preds, target_noise = predictor(img, velocity_2d, x_start=target_latents, noise=noise)
                 
-                # Predict denoised latent
-                preds = predictor(img, velocity_2d, noise)
-                
-                # Loss in latent space
-                loss = criterion(output=preds, target=target_latents)
+                # Loss in latent space (noise prediction)
+                loss = criterion(output=preds, target=target_noise)
 
                 # Physics constraint: Divergence Loss
                 if lambda_div > 0.0:
-                    latents_for_decode = preds.permute(0, 2, 1, 3, 4)
-                    decoded_velocity = predictor.vae.decode(latents_for_decode)
-                    div_l = divergence_loss(decoded_velocity)
-                    loss = loss + lambda_div * div_l
+                    pass
 
             else:
                 raise ValueError(f"Unknown option: {option}")

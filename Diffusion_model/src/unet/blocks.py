@@ -49,7 +49,7 @@ class Block(nn.Module):
 
 class DoubleBlock(nn.Module):
     """
-    Double convolutional block.
+    Double convolutional block with optional time embedding support.
     """
     def __init__(
         self,
@@ -59,7 +59,8 @@ class DoubleBlock(nn.Module):
         kernel_size: int,
         padding_mode: str,
         activation: nn.Module,
-        dropout: float = 0.0
+        dropout: float = 0.0,
+        time_emb_dim: int = None
     ):
         super().__init__()
 
@@ -84,9 +85,23 @@ class DoubleBlock(nn.Module):
             activation=activation
         )
         self.dropout_layer = nn.Dropout(dropout)
+        
+        # Time embedding projection
+        self.time_mlp = None
+        if time_emb_dim is not None:
+            self.time_mlp = nn.Sequential(
+                self.activation,
+                nn.Linear(time_emb_dim, mid_channels)
+            )
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, time_emb: torch.Tensor = None):
         x = self.block1(x)
+        
+        if self.time_mlp is not None and time_emb is not None:
+            time_comp = self.time_mlp(time_emb)
+            # Add time embedding to features (broadcast over spatial dims)
+            x = x + time_comp[:, :, None, None]
+            
         out = self.block2(x)
         out = self.dropout_layer(out)
         return out

@@ -148,9 +148,8 @@ def train(
                     img = input[0]
                     velocity_2d = input[1]
                     target_latents = predictor.encode_target(targets, velocity_2d)
-                    noise = torch.randn_like(target_latents)
-                    preds = predictor(img, velocity_2d, noise)
-                    loss = criterion(output=preds, target=target_latents)
+                    preds, target_noise = predictor(img, velocity_2d, x_start=target_latents)
+                    loss = criterion(output=preds, target=target_noise)
                 else:
                     preds = predictor(*input)
                     targets = predictor.normalizer['output'](targets)
