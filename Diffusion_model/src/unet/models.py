@@ -17,9 +17,9 @@ class UNet(nn.Module):
 
     def __init__(
         self,
-        in_channels=1,
+        in_channels=9,
         out_channels=1,
-        features: list[int] = [32, 64, 128, 256],
+        features: list[int] = [64, 128, 256, 512],
         kernel_size = 3,
         padding_mode = 'reflect',
         activation: _activ_type = 'silu',

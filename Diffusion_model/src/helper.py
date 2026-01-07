@@ -177,11 +177,8 @@ def run_epoch(
             # Encode 3D velocity target to latent space using 2D velocity for VAE
             target_latents = predictor.encode_target(targets, velocity_2d)
             
-            # Generate random noise with same shape as latent
-            noise = torch.randn_like(target_latents)
-            
             # Predict denoised latent (one-step: predict clean 3D from noise + 2D velocity)
-            preds = predictor(img, velocity_2d, noise)
+            preds = predictor(img, velocity_2d)
             
             # Loss in latent space (no normalization needed, already in latent)
             loss = criterion(output=preds, target=target_latents)
