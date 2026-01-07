@@ -55,6 +55,9 @@ class VariationalAutoencoder(nn.Module):
         # encoding
         mean, logvar = self.encoder(x)
 
+        # Clamping logvar to prevent numerical instability during sampling
+        logvar = torch.clamp(logvar, min=-10.0, max=10.0)
+
         # sampling
         latent = self.encoder.sample(mu=mean, logvar=logvar)
 

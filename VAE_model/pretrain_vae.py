@@ -182,8 +182,7 @@ def main():
             
             preds, (mean, logvar) = vae(inputs)
             
-            # Clamp logvar to prevent explosion
-            logvar = torch.clamp(logvar, min=-10, max=10)
+            # logvar is already clamped inside the model's encode method
             
             preds = preds * mask
             targets = targets * mask
@@ -258,8 +257,7 @@ def main():
                 # )
                 preds, (mean, logvar) = vae(inputs)
                 
-                # Clamp logvar to prevent explosion
-                logvar = torch.clamp(logvar, min=-10, max=10)
+                # logvar is already clamped
                 
                 preds = preds * mask
                 targets = targets * mask
@@ -326,7 +324,7 @@ def main():
             targets = inputs.clone()
             
             preds, (mean, logvar) = vae(inputs)
-            logvar = torch.clamp(logvar, min=-10, max=10)
+            # logvar is clamped in model
             
             preds = preds * mask
             targets = targets * mask

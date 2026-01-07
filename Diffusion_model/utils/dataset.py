@@ -57,8 +57,6 @@ class MicroFlowDataset(Dataset):
 
         if data is not None:
             self.data = data
-            if self.augment:
-                self._perform_augmentation()
             
             if self.save_stats:
                 self._save_statistics()
@@ -167,99 +165,54 @@ class MicroFlowDataset(Dataset):
             self.data = _data_x
             print("Loaded simulations with flow in 'x' direction.")
 
-        if self.augment:
-            self._perform_augmentation()
-        
         # save statistics
         if self.save_stats:
             self._save_statistics()
 
-    def _perform_augmentation(self):
-        """Augment dataset by flipping arrays."""
-        if self.use_3d:
-            # 1. Flip along height/y-axis (Flip Y)
-            # Data shapes: (samples, num_slices, channels, H, W)
-            for key in self.data.keys():
-                if key in ['velocity', 'velocity_input']:
-                    # Flip H (dim -2) and invert vy (channel 1)
-                    flipped_y = torch.flip(self.data[key], dims=[-2])
-                    flipped_y[:, :, 1, :, :] = -flipped_y[:, :, 1, :, :] # Invert vy
-                    
-                    self.data[key] = torch.cat(
-                        (self.data[key], flipped_y)
-                    )
-                elif self.data[key].dim() >= 4: # Has spatial dims (microstructure, pressure)
-                    self.data[key] = torch.cat(
-                        (self.data[key], torch.flip(self.data[key], dims=[-2]))
-                    )
-                else: # No spatial dims (dxyz, permeability)
-                    self.data[key] = torch.cat(
-                        (self.data[key], self.data[key])
-                    )
+    def _augment_sample(self, sample: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """
+        Augment a single sample on the fly.
+        """
+        # 1. Flip along height/y-axis (Flip Y) with p=0.5
+        if torch.rand(1) < 0.5:
+            # Flip H (dim -2)
+            for key in sample.keys():
+                if key in ['dxyz', 'permeability']:
+                    continue
+                # Check if it has spatial dims
+                if sample[key].ndim >= 2:
+                    sample[key] = torch.flip(sample[key], dims=[-2])
             
-            # 2. Flip along depth/z-axis (Flip Z) - applied to both original and Y-flipped data
-            for key in self.data.keys():
-                if key in ['velocity', 'velocity_input']:
-                    # Flip Z (dim 1) and invert vz (channel 2)
-                    flipped_z = torch.flip(self.data[key], dims=[1])
-                    flipped_z[:, :, 2, :, :] = -flipped_z[:, :, 2, :, :] # Invert vz
-                    
-                    self.data[key] = torch.cat(
-                        (self.data[key], flipped_z)
-                    )
-                elif self.data[key].dim() >= 4: # Has spatial dims (microstructure, pressure)
-                    # Flip Z (dim 1) - microstructure/pressure are scalar, so no sign inversion
-                    # Note: microstructure is (samples, num_slices, 1, H, W)
-                    self.data[key] = torch.cat(
-                        (self.data[key], torch.flip(self.data[key], dims=[1]))
-                    )
-                else: # No spatial dims (dxyz, permeability)
-                    self.data[key] = torch.cat(
-                        (self.data[key], self.data[key])
-                    )
-        else:
-            # Flip (only for 2D data)
-            # We need to know which keys are spatial.
-            # Assuming standard keys + optional ones.
-            # Or just check dimensions.
-            
-            for key in self.data.keys():
-                if key in ['microstructure', 'pressure']:
-                    self.data[key] = torch.cat(
-                        (self.data[key], torch.from_numpy(self.data[key].numpy()[:, :, ::-1, :].copy()))
-                    )
-                elif key == 'velocity':
-                    tmp = torch.from_numpy(self.data[key].numpy()[:, :, ::-1, :].copy()) # flip
-                    tmp[:, 1, :, :] = - tmp[:, 1, :, :] # switch sign for y-velocity component
+            # Invert vy
+            if 'velocity' in sample:
+                if self.use_3d: # (slices, 3, H, W)
+                    sample['velocity'][:, 1, :, :] = -sample['velocity'][:, 1, :, :]
+                else: # (2, H, W)
+                    sample['velocity'][1, :, :] = -sample['velocity'][1, :, :]
 
-                    self.data[key] = torch.cat(
-                        (self.data[key], tmp)
-                    )
-                elif key == 'velocity_input': # Handle velocity_input if present in 2D
-                     # Assuming it follows velocity structure or similar
-                     # If it's 2D velocity input, it might need sign flip too if it has y-component
-                     # But usually velocity_input is just microstructure in 2D? No, it's U_2d.pt
-                     # If it has channels, we should check.
-                     # For now, assuming it's handled like velocity if it has 2 channels, or just flipped if 1.
-                     # Let's stick to safe logic: if it's spatial, flip.
-                     if self.data[key].dim() >= 3:
-                         # Check if it has channels that need sign flip?
-                         # For safety, let's just flip spatially for now unless we know it's vector field.
-                         # If it is U_2d.pt, it likely has vector components.
-                         # But let's assume standard keys for now as per original code.
-                         self.data[key] = torch.cat(
-                            (self.data[key], torch.flip(self.data[key], dims=[-2]))
-                        )
-                else:
-                    # Non-spatial or unknown
-                    if self.data[key].dim() >= 3: # Heuristic for spatial
-                         self.data[key] = torch.cat(
-                            (self.data[key], torch.flip(self.data[key], dims=[-2]))
-                        )
-                    else:
-                        self.data[key] = torch.cat(
-                            (self.data[key], self.data[key])
-                        )
+            if 'velocity_input' in sample:
+                 if self.use_3d:
+                      sample['velocity_input'][:, 1, :, :] = -sample['velocity_input'][:, 1, :, :]
+                 elif sample['velocity_input'].ndim == 3 and sample['velocity_input'].shape[0] >= 2:
+                      sample['velocity_input'][1, :, :] = -sample['velocity_input'][1, :, :]
+
+        # 2. Flip along depth/z-axis (Flip Z) - 3D only
+        if self.use_3d and torch.rand(1) < 0.5:
+             # Flip Z (dim 0: num_slices)
+             for key in sample.keys():
+                if key in ['dxyz', 'permeability']:
+                    continue
+                if sample[key].ndim >= 4: # Has 4 dims (slices, C, H, W)
+                     sample[key] = torch.flip(sample[key], dims=[0])
+                
+             # Invert vz (channel 2)
+             if 'velocity' in sample:
+                 sample['velocity'][:, 2, :, :] = -sample['velocity'][:, 2, :, :]
+             
+             if 'velocity_input' in sample:
+                 sample['velocity_input'][:, 2, :, :] = -sample['velocity_input'][:, 2, :, :]
+
+        return sample
 
     def download(self, url: str):
         """
@@ -323,6 +276,9 @@ class MicroFlowDataset(Dataset):
             if 'velocity_input' in self.data:
                 sample['velocity_input'] = self.data['velocity_input'][idx].float()
         
+        if self.augment:
+            sample = self._augment_sample(sample)
+
         return sample
 
     @staticmethod
