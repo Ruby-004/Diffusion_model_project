@@ -1,0 +1,14 @@
+make sure inference.py does the following
+
+1. import already trained vae from file path (look at train.py from diffusion for example)
+2. import already trained diffusion model from file path (look at evaluate.py for example)
+3. pass sample from file path to vae encoder
+4. pass output of 3 to diffusion model 
+5. pass output of 4 to vae decoder
+6. pass 6 through the visualizer (napari)
+
+trough these steps we should be able to use the napari interface to look at the fully processed sample in 3d and in slices. 
+
+
+
+
