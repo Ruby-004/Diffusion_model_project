@@ -186,7 +186,7 @@ class LatentDiffusionPredictor(Predictor):
         model_kwargs: dict = {},
         distance_transform = True,
         vae_path: str = None,
-        num_slices: int = 10,
+        num_slices: int = 11,
     ) -> None:
         
         # Helper imports
