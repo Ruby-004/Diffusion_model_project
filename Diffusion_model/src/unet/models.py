@@ -34,7 +34,7 @@ class UNet(nn.Module):
     def __init__(
         self,
         in_channels=9,
-        out_channels=1,
+        out_channels=4,
         features: list[int] = [64, 128, 256, 512],
         kernel_size = 3,
         padding_mode = 'reflect',
