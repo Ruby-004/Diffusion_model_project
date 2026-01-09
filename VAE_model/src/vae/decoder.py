@@ -22,6 +22,9 @@ class Decoder(nn.Module):
         padding = get_padding(self.kernel_size)
 
 
+        # Use asymmetric upsampling to match encoder - preserve depth dimension
+        # Only upsample in H and W, NOT in depth D
+        # This allows the diffusion model to work accurately in latent space
         self.layers = nn.Sequential(
             # nn.Conv3d(self.in_channels, self.in_channels, kernel_size=1, padding=0),
 
@@ -36,8 +39,8 @@ class Decoder(nn.Module):
 
             ResidualBlock(in_channels=512, out_channels=512),
 
-            # (B, C, D, H, W) -> (B, C, 2*D, 2*H, 2*W)
-            nn.Upsample(scale_factor=2),
+            # (B, C, D, H, W) -> (B, C, D, 2*H, 2*W) - preserve depth!
+            nn.Upsample(scale_factor=(1, 2, 2)),
 
             nn.Conv3d(512, 256, kernel_size=self.kernel_size, padding=padding),
 
@@ -46,8 +49,8 @@ class Decoder(nn.Module):
             ResidualBlock(in_channels=256, out_channels=256),
 
 
-            # (B, C, 2*D, 2*H, 2*W) -> (B, C, 4*D, 4*H, 4*W)
-            nn.Upsample(scale_factor=2),
+            # (B, C, D, 2*H, 2*W) -> (B, C, D, 4*H, 4*W) - preserve depth!
+            nn.Upsample(scale_factor=(1, 2, 2)),
 
             nn.Conv3d(256, 128, kernel_size=self.kernel_size, padding=padding),
 

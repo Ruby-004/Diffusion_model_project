@@ -113,7 +113,7 @@ class MicroFlowDataset(Dataset):
 
         # For 3D data with shape [samples, depth, channels, H, W]
         # Reshape to [samples, channels, depth, H, W] for Conv3d compatibility
-        # Pad depth to 12 (divisible by 4 for two stride-2 downsamples)
+        # No depth padding needed since VAE now preserves depth dimension (asymmetric stride)
         microstructure = self.data['microstructure'][idx].permute(1, 0, 2, 3).float()  # [C, D, H, W]
         
         # Input: 2D flow field (all 3 components, z is null)
@@ -124,12 +124,8 @@ class MicroFlowDataset(Dataset):
         
         pressure = self.data['pressure'][idx].permute(1, 0, 2, 3).float()  # [C, D, H, W]
         
-        # Pad depth dimension from 11 to 12 by replicating the last slice
-        import torch.nn.functional as F
-        microstructure = F.pad(microstructure, (0, 0, 0, 0, 0, 1), mode='replicate')  # [C, 12, H, W]
-        velocity_input = F.pad(velocity_input, (0, 0, 0, 0, 0, 1), mode='replicate')  # [3, 12, H, W]
-        velocity_target = F.pad(velocity_target, (0, 0, 0, 0, 0, 1), mode='replicate')  # [3, 12, H, W]
-        pressure = F.pad(pressure, (0, 0, 0, 0, 0, 1), mode='replicate')  # [C, 12, H, W]
+        # No depth padding - VAE preserves depth dimension for accurate z-flow prediction
+        # The diffusion model now works in latent space with full depth resolution
         
         sample = {
             'microstructure': microstructure,
@@ -332,10 +328,8 @@ class MicroFlowDatasetVAE(Dataset):
         
         pressure = self.data['pressure'][actual_idx].permute(1, 0, 2, 3).float()  # [C, D, H, W]
         
-        # Pad depth dimension from 11 to 12
-        microstructure = F.pad(microstructure, (0, 0, 0, 0, 0, 1), mode='replicate')  # [C, 12, H, W]
-        velocity = F.pad(velocity, (0, 0, 0, 0, 0, 1), mode='replicate')  # [3, 12, H, W]
-        pressure = F.pad(pressure, (0, 0, 0, 0, 0, 1), mode='replicate')  # [C, 12, H, W]
+        # No depth padding needed - VAE now preserves depth dimension with asymmetric stride
+        # The diffusion model works in latent space with full depth resolution for accurate z-flow
         
         # Augmentation
         if self.augment:

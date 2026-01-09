@@ -268,7 +268,7 @@ class LatentDiffusionPredictor(Predictor):
         with torch.no_grad():
             # Create dummy input: (batch, channels, depth, height, width)
             dummy_5d = torch.zeros(1, 3, num_slices, img.shape[3], img.shape[4]).to(device)
-            latent_shape = self.vae.encoder(dummy_5d)[0].shape  # (1, latent_channels, depth/4, H/4, W/4)
+            latent_shape = self.vae.encoder(dummy_5d)[0].shape  # (1, latent_channels, depth, H/4, W/4) - depth preserved!
             latent_channels = latent_shape[1]
             latent_depth = latent_shape[2]
             latent_h, latent_w = latent_shape[3], latent_shape[4]
@@ -279,7 +279,7 @@ class LatentDiffusionPredictor(Predictor):
         
         # Encode using 3D VAE
         with torch.no_grad():
-            velocity_2d_latent_5d, _ = self.vae.encode(velocity_2d_permuted)  # (batch, latent_channels, depth/4, H/4, W/4)
+            velocity_2d_latent_5d, _ = self.vae.encode(velocity_2d_permuted)  # (batch, latent_channels, depth, H/4, W/4) - depth preserved!
         
         # Permute to (batch, depth, latent_channels, H, W)
         velocity_2d_latent = velocity_2d_latent_5d.permute(0, 2, 1, 3, 4)
@@ -437,6 +437,25 @@ class LatentDiffusionPredictor(Predictor):
         velocity_flat = velocity_3d.reshape(batch * depth, channels, height, width)
         velocity_flat = self.normalizer['output'].inverse(velocity_flat)
         velocity_3d = velocity_flat.reshape(batch, depth, channels, height, width)
+
+        # Interpolate back to original number of slices if mismatch (e.g. VAE output 8 vs input 11)
+        if depth != num_slices:
+            velocity_3d = torch.nn.functional.interpolate(
+                velocity_3d.permute(0, 2, 1, 3, 4), # (batch, channels, depth, height, width)
+                size=(num_slices, height, width),
+                mode='trilinear',
+                align_corners=False
+            ).permute(0, 2, 1, 3, 4)
+
+        # Masking
+        # img shape might be (batch, num_slices, 1, H, W) or (batch, 1, 1, H, W)
+        # Ensure img is broadcastable or matches dimensions
+        if img.dim() == 5 and img.shape[1] != velocity_3d.shape[1] and img.shape[1] == 1:
+             # img is (batch, 1, 1, H, W), velocity is (batch, 11, ...)
+             # Let it broadcast
+             pass
+        
+        velocity_3d = velocity_3d * img
         
         return velocity_3d
 
