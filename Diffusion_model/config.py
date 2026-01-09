@@ -213,7 +213,7 @@ group_train.add_argument(
 group_train.add_argument(
     '--num-slices',
     type=int,
-    default=10,
+    default=11,
     help='Number of 2D slices in 3D flow field (for latent-diffusion predictor).'
 )
 group_train.add_argument(
