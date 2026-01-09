@@ -9,6 +9,9 @@ make sure inference.py does the following
 
 trough these steps we should be able to use the napari interface to look at the fully processed sample in 3d and in slices. 
 
+the following links are examples of how this could be implemented:
+https://napari.org/dev/gallery/layer_bounding_box.html
+https://napari.org/dev/gallery/3Dimage_plane_rendering.html
 
 
 
