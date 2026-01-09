@@ -131,8 +131,6 @@ def normalized_mse_loss(
     `target`: target value (shape: [B,C,W,H]).\n
     """
 
-    n_samples = target.shape[0]
-
     # Sample-wise norms
     # shape: (batch, channels)
     smp_wise_diff_norm = linalg.matrix_norm(
@@ -145,17 +143,16 @@ def normalized_mse_loss(
         dim=(-2,-1)
     )**2
 
-    # loss for each channel
-    out = (1/n_samples) * torch.sum(
-        smp_wise_diff_norm/smp_wise_target_norm,
-        dim=0
-    )
-    # out = (1/n_samples) * torch.sum(
-    #     smp_wise_diff_norm,
-    #     dim=0
-    # )
+    # Avoid division by zero
+    epsilon = 1e-8
 
-    return out
+    # loss for each channel and sample
+    normalized_mse = smp_wise_diff_norm / (smp_wise_target_norm + epsilon)
+
+    # Average over batch and channels to get a single scalar representing the percentage of error
+    loss = torch.mean(normalized_mse)
+
+    return loss
 
 
 def normalized_exp_loss(

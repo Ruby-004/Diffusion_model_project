@@ -118,7 +118,7 @@ group_train.add_argument(
     '--cost-function',
     type=str,
     default='normalized_mae_loss',
-    choices=['normalized_mae_loss', 'mae_loss', 'mse_loss', 'huber_loss'],
+    choices=['normalized_mae_loss', 'normalized_mse_loss', 'normalized_exp_loss', 'mae_loss', 'mse_loss', 'huber_loss'],
     help='Cost function for training.'
 )
 group_train.add_argument(

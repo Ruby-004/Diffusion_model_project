@@ -64,7 +64,7 @@ class DiffusionScheduler(nn.Module):
         
         noise = torch.randn_like(x_t)
         # No noise when t == 0
-        mask = (t > 0).float().view(-1, 1, 1, 1)
+        mask = 1.0 if t > 0 else 0.0
         
         return model_mean + torch.sqrt(posterior_variance_t) * noise * mask
 
