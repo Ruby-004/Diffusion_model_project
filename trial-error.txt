@@ -1,6 +1,6 @@
-1. remove noise from run epoch function (helper.py line 181)
-2. change in channel in class Unet (models.py line 20)
-3. change feature list in class Unet (models.py line 22)
+1. use attenetion
+2. increase latent channels
+3. use weight decay per direction
 4.
 5.
 6.
