@@ -330,18 +330,79 @@ class MicroFlowDataset(Dataset):
 
     def _save_statistics(self):
         """
-        Save dataset statistics.
-
+        Save dataset statistics including per-component max values for velocity.
+        
+        Per-component normalization is critical because w (vz) has much lower
+        magnitude than u (vx) and v (vy). Without per-component normalization,
+        the diffusion model learns to predict near-zero w values.
         """
         log_file = osp.join(self.root_dir, 'statistics.json')
 
         stats = {}
         
-        # Only save statistics for data that exists
+        # Save statistics for target velocity (U)
         if 'velocity' in self.data:
+            velocity = self.data['velocity']
+            
+            # Global max (for backward compatibility)
             stats['U'] = {
-                'max': self.data['velocity'].abs().max().item()
+                'max': velocity.abs().max().item()
             }
+            
+            # Per-component max values for proper normalization
+            # This is CRITICAL for diffusion model to learn all components equally
+            # Shape depends on use_3d:
+            # - 2D: (N, 2, H, W) - only vx, vy
+            # - 3D: (N, slices, 3, H, W) - vx, vy, vz
+            if self.use_3d:
+                # 3D case: velocity shape is (N, slices, 3, H, W)
+                max_u = velocity[:, :, 0, :, :].abs().max().item()
+                max_v = velocity[:, :, 1, :, :].abs().max().item()
+                max_w = velocity[:, :, 2, :, :].abs().max().item()
+                
+                stats['U_per_component'] = {
+                    'max_u': max_u,
+                    'max_v': max_v,
+                    'max_w': max_w,
+                    'description': 'Per-component max for target velocity (vx, vy, vz)'
+                }
+                
+                # Also compute std for diagnostics
+                stats['U_per_component']['std_u'] = velocity[:, :, 0, :, :].std().item()
+                stats['U_per_component']['std_v'] = velocity[:, :, 1, :, :].std().item()
+                stats['U_per_component']['std_w'] = velocity[:, :, 2, :, :].std().item()
+            else:
+                # 2D case: velocity shape is (N, 2, H, W)
+                max_u = velocity[:, 0, :, :].abs().max().item()
+                max_v = velocity[:, 1, :, :].abs().max().item()
+                
+                stats['U_per_component'] = {
+                    'max_u': max_u,
+                    'max_v': max_v,
+                    'description': 'Per-component max for target velocity (vx, vy)'
+                }
+        
+        # Save statistics for input velocity (U_2d) if it exists
+        if 'velocity_input' in self.data:
+            velocity_input = self.data['velocity_input']
+            
+            stats['U_2d'] = {
+                'max': velocity_input.abs().max().item()
+            }
+            
+            if self.use_3d:
+                # 3D case: velocity_input shape is (N, slices, 3, H, W)
+                # Note: w component should be all zeros for U_2d
+                max_u_2d = velocity_input[:, :, 0, :, :].abs().max().item()
+                max_v_2d = velocity_input[:, :, 1, :, :].abs().max().item()
+                max_w_2d = velocity_input[:, :, 2, :, :].abs().max().item()
+                
+                stats['U_2d_per_component'] = {
+                    'max_u': max_u_2d,
+                    'max_v': max_v_2d,
+                    'max_w': max_w_2d,
+                    'description': 'Per-component max for input velocity (vx, vy, vz). Note: vz should be 0.'
+                }
         
         if 'pressure' in self.data:
             stats['p'] = {
@@ -358,6 +419,10 @@ class MicroFlowDataset(Dataset):
             json.dump(stats, f, indent=0)
         
         print(f"Saved statistics to {log_file}: {list(stats.keys())}")
+        if 'U_per_component' in stats:
+            pc = stats['U_per_component']
+            if 'max_w' in pc:
+                print(f"  Per-component max: u={pc['max_u']:.6f}, v={pc['max_v']:.6f}, w={pc['max_w']:.6f}")
 
     @staticmethod
     def _rotate_y_field(x: torch.Tensor):

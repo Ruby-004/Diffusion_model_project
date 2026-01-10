@@ -125,7 +125,55 @@ group_train.add_argument(
     '--lambda-div',
     type=float,
     default=0.0,
-    help='Weight for divergence constraint loss (physics-based penalty).'
+    help='Weight for divergence/mass conservation loss (physics-based penalty). Recommended: 0.01'
+)
+group_train.add_argument(
+    '--lambda-flow',
+    type=float,
+    default=0.0,
+    help='Weight for flow-rate consistency loss (constant flux constraint). Recommended: 0.001'
+)
+group_train.add_argument(
+    '--lambda-bc',
+    type=float,
+    default=0.0,
+    help='Weight for no-slip boundary condition loss. Recommended: 0.1'
+)
+group_train.add_argument(
+    '--lambda-smooth',
+    type=float,
+    default=0.0,
+    help='Weight for smoothness regularization. Recommended: 0.0001'
+)
+group_train.add_argument(
+    '--physics-loss-freq',
+    type=int,
+    default=1,
+    help='Compute physics loss every N batches (1=every batch, higher=less frequent for speed)'
+)
+group_train.add_argument(
+    '--weight-u',
+    type=float,
+    default=1.0,
+    help='Weight for u (vx) component in velocity loss. Default: 1.0'
+)
+group_train.add_argument(
+    '--weight-v',
+    type=float,
+    default=1.0,
+    help='Weight for v (vy) component in velocity loss. Default: 1.0'
+)
+group_train.add_argument(
+    '--weight-w',
+    type=float,
+    default=1.0,
+    help='Weight for w (vz) component in velocity loss. Increase to boost w learning (e.g., 3.0-10.0)'
+)
+group_train.add_argument(
+    '--lambda-velocity',
+    type=float,
+    default=0.0,
+    help='Weight for auxiliary velocity reconstruction loss (computed on decoded output). Recommended: 0.1-1.0'
 )
 
 group_train.add_argument(
@@ -316,6 +364,10 @@ def process_args(args: argparse.Namespace):
             'num_epochs': args.num_epochs,
             'cost_function': args.cost_function,
             'lambda_div': args.lambda_div,
+            'lambda_flow': args.lambda_flow,
+            'lambda_bc': args.lambda_bc,
+            'lambda_smooth': args.lambda_smooth,
+            'physics_loss_freq': args.physics_loss_freq,
             'predictor_type': args.predictor_type,
             'predictor': {
                 'model_name':args.model_name,

@@ -34,7 +34,19 @@ def train(
         'train_loss': [],
         'val_loss': [],
         'time': [],
-        'learning_rate_history': []
+        'learning_rate_history': [],
+        # Physics metrics logging
+        'physics_metrics': {
+            'div_mean': [],
+            'div_std': [],
+            'flow_rate_cv': [],
+            'vel_in_solid': [],
+            'vel_mean_fluid': [],
+            'loss_divergence': [],
+            'loss_flow_rate': [],
+            'loss_no_slip': [],
+            'loss_smoothness': []
+        }
     }
     log_folder = make_log_folder(param_dict)
 
@@ -47,10 +59,42 @@ def train(
     scheduler_kwargs = train_dict['scheduler']
     num_epochs = train_dict['num_epochs']
     cost_function_name = train_dict['cost_function']
+    
+    # Physics loss parameters
     lambda_div = train_dict.get('lambda_div', 0.0)
+    lambda_flow = train_dict.get('lambda_flow', 0.0)
+    lambda_bc = train_dict.get('lambda_bc', 0.0)
+    lambda_smooth = train_dict.get('lambda_smooth', 0.0)
+    physics_loss_freq = train_dict.get('physics_loss_freq', 1)
+    
+    # Component weighting parameters
+    lambda_velocity = train_dict.get('lambda_velocity', 0.0)
+    weight_u = train_dict.get('weight_u', 1.0)
+    weight_v = train_dict.get('weight_v', 1.0)
+    weight_w = train_dict.get('weight_w', 1.0)
+    
     predictor_type = train_dict['predictor_type']
     predictor_kwargs = train_dict['predictor']
     
+    # Print physics configuration
+    physics_enabled = any([lambda_div > 0, lambda_flow > 0, lambda_bc > 0, lambda_smooth > 0])
+    velocity_loss_enabled = lambda_velocity > 0
+    if physics_enabled:
+        print("\n=== Physics-Informed Training Enabled ===")
+        print(f"  lambda_div (mass conservation): {lambda_div}")
+        print(f"  lambda_flow (flow-rate consistency): {lambda_flow}")
+        print(f"  lambda_bc (no-slip BC): {lambda_bc}")
+        print(f"  lambda_smooth (smoothness): {lambda_smooth}")
+        print(f"  physics_loss_freq: every {physics_loss_freq} batches")
+        print("==========================================\n")
+    
+    if velocity_loss_enabled:
+        print("\n=== Component-Weighted Velocity Loss Enabled ===")
+        print(f"  lambda_velocity: {lambda_velocity}")
+        print(f"  weight_u (vx): {weight_u}")
+        print(f"  weight_v (vy): {weight_v}")
+        print(f"  weight_w (vz): {weight_w}")
+        print("================================================\n")
 
     # Model
     predictor = set_model(
@@ -78,24 +122,41 @@ def train(
 
         current_lr = optimizer.param_groups[0]['lr']
 
-        # run epoch
+        # run epoch with physics-informed training
         start_time = time.time()
-        avg_train_loss, avg_val_loss = run_epoch(
+        avg_train_loss, avg_val_loss, physics_metrics = run_epoch(
             loaders=(train_loader, val_loader),
             predictor=predictor,
             optimizer=optimizer,
             criterion=criterion,
             device=device,
-            lambda_div=lambda_div
+            lambda_div=lambda_div,
+            lambda_flow=lambda_flow,
+            lambda_bc=lambda_bc,
+            lambda_smooth=lambda_smooth,
+            physics_loss_freq=physics_loss_freq,
+            lambda_velocity=lambda_velocity,
+            weight_u=weight_u,
+            weight_v=weight_v,
+            weight_w=weight_w
         )
         dtime = time.time() - start_time
 
-        # log
+        # log standard metrics
         log_dict['epoch'].append(epoch)
         log_dict['time'].append(dtime)
         log_dict['train_loss'].append(avg_train_loss)
         log_dict['val_loss'].append(avg_val_loss)
         log_dict['learning_rate_history'].append(current_lr)
+        
+        # log physics metrics
+        for key in log_dict['physics_metrics']:
+            if key in physics_metrics:
+                log_dict['physics_metrics'][key].append(physics_metrics[key])
+            elif key.replace('loss_', '') in physics_metrics:
+                log_dict['physics_metrics'][key].append(physics_metrics[key.replace('loss_', '')])
+            else:
+                log_dict['physics_metrics'][key].append(0.0)
 
         # Save
         model_path = osp.join(log_folder, 'model.pt')
@@ -110,7 +171,13 @@ def train(
         with open(log_path, 'w') as f:
             json.dump(log_dict, f, indent=4)
 
-        print(f"Epoch {epoch}: train_loss={avg_train_loss} | val_loss={avg_val_loss} | time={dtime:.2f} s")
+        # Print progress with physics metrics
+        print(f"Epoch {epoch}: train_loss={avg_train_loss:.6f} | val_loss={avg_val_loss:.6f} | time={dtime:.2f} s")
+        if physics_enabled and physics_metrics:
+            print(f"  Physics: div_mean={physics_metrics.get('div_mean', 0):.6f} | "
+                  f"flow_cv={physics_metrics.get('flow_rate_cv', 0):.6f} | "
+                  f"vel_solid={physics_metrics.get('vel_in_solid', 0):.6f}")
+        
         if scheduler is not None: scheduler.step()
 
 

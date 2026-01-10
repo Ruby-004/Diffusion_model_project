@@ -30,10 +30,9 @@ class Decoder(nn.Module):
 
             nn.Conv3d(self.in_channels, 512, kernel_size=self.kernel_size, padding=padding),
 
-            # ResidualBlock(in_channels=512, out_channels=512),
-
-            AttentionBlock(in_channels=512),
-
+            # AttentionBlock removed - with preserved depth (11×64×64 = 45k positions),
+            # the attention matrix would need 15+ GB memory
+            # ResidualBlocks are sufficient for VAE reconstruction
 
             ResidualBlock(in_channels=512, out_channels=512),
 

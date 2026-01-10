@@ -45,8 +45,9 @@ class Encoder(nn.Module):
 
             ResidualBlock(in_channels=512, out_channels=512),
 
-
-            AttentionBlock(in_channels=512),
+            # AttentionBlock removed - with preserved depth (11×64×64 = 45k positions),
+            # the attention matrix would need 15+ GB memory
+            # ResidualBlocks are sufficient for VAE reconstruction
 
             nn.GroupNorm(num_groups=32, num_channels=512),
 

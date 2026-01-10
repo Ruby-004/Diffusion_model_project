@@ -228,6 +228,16 @@ class LatentDiffusionPredictor(Predictor):
             project_root = osp.abspath(osp.join(osp.dirname(__file__), '..', '..'))
             vae_path = osp.join(project_root, vae_path)
         
+        # Load VAE config to get norm_factors
+        vae_log_path = osp.join(vae_path, 'vae_log.json')
+        vae_norm_factors = None
+        if osp.exists(vae_log_path):
+            with open(vae_log_path, 'r') as f:
+                vae_log = json.load(f)
+            if 'norm_factors' in vae_log:
+                vae_norm_factors = vae_log['norm_factors']
+                print(f"Loaded VAE norm_factors: {vae_norm_factors}")
+        
         # Load VAE with correct architecture (3 input channels from velocity only)
         # Use latent_channels from model_kwargs if provided (should match output channels)
         self.vae = VariationalAutoencoder.from_directory(
@@ -236,6 +246,17 @@ class LatentDiffusionPredictor(Predictor):
             latent_channels=latent_channels
         )
         
+        # Update output normalizer with VAE's norm_factors if available
+        if vae_norm_factors is not None:
+            # norm_factors is [max_u, max_v, max_w] for velocity channels
+            self.normalizer['output'] = MaxNormalizer(scale_factors=vae_norm_factors)
+            print(f"Set output normalizer to per-component: {vae_norm_factors}")
+        else:
+            print("WARNING: VAE norm_factors not found. Using default normalization.")
+        
+        # Store whether VAE norm_factors were loaded (to prevent overriding)
+        self._vae_norm_loaded = vae_norm_factors is not None
+        
         # Freeze VAE parameters
         for param in self.vae.parameters():
             param.requires_grad = False
@@ -243,6 +264,22 @@ class LatentDiffusionPredictor(Predictor):
         
         print(f'Initialized {self.type} predictor with {self.trainable_params} parameters.')
         print(f'Loaded VAE from {vae_path} (frozen).')
+        
+    def set_normalizer(self, norm_dict: dict):
+        """
+        Set normalizer parameters.
+        
+        For LatentDiffusionPredictor, if VAE norm_factors were loaded from vae_log.json,
+        we skip overriding the output normalizer to ensure consistency with VAE training.
+        """
+        for key, val in norm_dict.items():
+            if val is not None:
+                # Skip output normalizer if VAE norm_factors were loaded
+                if key == 'output' and hasattr(self, '_vae_norm_loaded') and self._vae_norm_loaded:
+                    print(f"Keeping VAE norm_factors for '{key}' (not overriding with statistics.json)")
+                    continue
+                self.normalizer[key] = MaxNormalizer(scale_factors=val)
+        return self.normalizer
         
     def to(self, device):
         super().to(device)

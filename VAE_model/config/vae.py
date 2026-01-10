@@ -65,3 +65,16 @@ parser.add_argument(
     default=1e-6,  # Reduced for stability with 3D model
     help='Learning rate.'
 )
+parser.add_argument(
+    '--per-component-norm',
+    action='store_true',
+    default=True,
+    help='Use per-component normalization (max_u, max_v, max_w) instead of global max. '
+         'Recommended for 3D flow where w component has different scale than u/v.'
+)
+parser.add_argument(
+    '--no-per-component-norm',
+    dest='per_component_norm',
+    action='store_false',
+    help='Disable per-component normalization and use global max instead (legacy behavior).'
+)

@@ -23,6 +23,7 @@ def main():
     parser = argparse.ArgumentParser(description="Inference for Microstructure Flow Prediction")
     parser.add_argument('model_path', type=str, help='Path to the trained diffusion model (directory or .pt file)')
     parser.add_argument('sample_path', type=str, nargs='?', default=None, help='Path to the input sample (.pt file). If not provided, uses a sample from the test set.')
+    parser.add_argument('--vae-path', type=str, default=None, help='Path to the trained VAE model directory. If not provided, uses VAE path from model config.')
     parser.add_argument('--index', type=int, default=0, help='Index of the sample in the test set to use (only if sample_path is not provided). Default: 0')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu', help='Device to use')
     
@@ -72,6 +73,12 @@ def main():
     # Fix VAE path in config if it was absolute path from another machine
     if 'vae_path' in predictor_kwargs:
         vae_path = predictor_kwargs['vae_path']
+        
+        # Override with command-line argument if provided
+        if args.vae_path:
+            vae_path = args.vae_path
+            print(f"Using VAE path from command-line argument: {vae_path}")
+        
         if not os.path.exists(vae_path) and not os.path.isabs(vae_path):
              # Try absolute relative to project
              vae_path = os.path.join(project_root, vae_path)
@@ -82,6 +89,10 @@ def main():
              vae_path = os.path.join(project_root, vae_path[idx:])
              
         predictor_kwargs['vae_path'] = vae_path
+    elif args.vae_path:
+        # VAE path not in config but provided via command line
+        predictor_kwargs['vae_path'] = args.vae_path
+        print(f"Using VAE path from command-line argument: {args.vae_path}")
 
     print("Initializing models...")
     # This initializes LatentDiffusionPredictor, which loads the VAE (Step 1)

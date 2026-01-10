@@ -96,20 +96,48 @@ def main():
     with open(stats_file, 'r') as f:
         statistics = json.load(f)
 
-    # Compute max value across both velocity fields for [0,1] normalization
-    # Handle case where U_2d might be missing (legacy statistics file)
-    if 'U_2d' in statistics:
-        max_U_2d = statistics['U_2d']['max']
+    # Per-component normalization for better w-component learning
+    # The w (vz) component is typically much sparser than u/v, requiring separate normalization
+    use_per_component = args.per_component_norm
+    
+    if use_per_component and 'U_per_component' in statistics:
+        pc = statistics['U_per_component']
+        pc_2d = statistics.get('U_2d_per_component', {})
+        
+        # Use max of U and U_2d for each component
+        max_u = max(pc['max_u'], pc_2d.get('max_u', 0))
+        max_v = max(pc['max_v'], pc_2d.get('max_v', 0))
+        max_w = max(pc['max_w'], pc_2d.get('max_w', 0))
+        
+        # Create per-component normalization tensor [3] for (u, v, w)
+        norm_factors = torch.tensor([max_u, max_v, max_w], dtype=torch.float32)
+        
+        print(f"\n=== Per-Component Normalization ===")
+        print(f"  max_u (vx): {max_u:.6f}")
+        print(f"  max_v (vy): {max_v:.6f}")
+        print(f"  max_w (vz): {max_w:.6f}")
+        print(f"  Ratio max_u/max_w: {max_u/max_w:.2f}x")
+        print(f"===================================\n")
     else:
-        # Fallback: try to infer from U or just use U
-        print("WARNING: 'U_2d' key not found in statistics.json. Using 'U' for max_U_2d.")
-        max_U_2d = statistics['U']['max']
+        # Fallback to global max (legacy behavior)
+        if 'U_2d' in statistics:
+            max_U_2d = statistics['U_2d']['max']
+        else:
+            print("WARNING: 'U_2d' key not found in statistics.json. Using 'U' for max_U_2d.")
+            max_U_2d = statistics['U']['max']
 
-    max_U_3d = statistics['U']['max']
-    max_velocity = max(max_U_2d, max_U_3d)
-
-    print(f"Loaded statistics: max_U_2d={max_U_2d:.6f}, max_U_3d={max_U_3d:.6f}")
-    print(f"Using max_velocity={max_velocity:.6f} for [0,1] normalization")
+        max_U_3d = statistics['U']['max']
+        max_velocity = max(max_U_2d, max_U_3d)
+        
+        # Create uniform normalization tensor
+        norm_factors = torch.tensor([max_velocity, max_velocity, max_velocity], dtype=torch.float32)
+        
+        print(f"\n=== Global Normalization (Legacy) ===")
+        print(f"  max_U_2d={max_U_2d:.6f}, max_U_3d={max_U_3d:.6f}")
+        print(f"  Using max_velocity={max_velocity:.6f} for all components")
+        if 'U_per_component' in statistics:
+            print(f"  TIP: Use --per-component-norm for better w-component training")
+        print(f"======================================\n")
 
     """Model"""
 
@@ -143,7 +171,11 @@ def main():
     )
 
     log_dict = {
-        'loss': {'recons_train': [], 'recons_val': [], 'kl_train':[], 'kl_val':[], 'kl_coeff': []}
+        'loss': {'recons_train': [], 'recons_val': [], 'kl_train':[], 'kl_val':[], 'kl_coeff': []},
+        'in_channels': args.in_channels,
+        'latent_channels': args.latent_channels,
+        'per_component_norm': use_per_component,
+        'norm_factors': norm_factors.tolist(),  # [max_u, max_v, max_w] for decoding
     }
     
     for epoch in range(args.num_epochs):
@@ -176,9 +208,11 @@ def main():
             inputs = velocity
             targets = inputs.clone()  # Autoencoder: reconstruct the same input
             
-            # Normalize both inputs and targets to [0,1]
-            inputs = inputs / max_velocity
-            targets = targets / max_velocity
+            # Normalize to [0,1] using per-component or global normalization
+            # norm_factors shape: [3] -> reshape to [1, 3, 1, 1, 1] for broadcasting
+            nf = norm_factors.to(args.device).view(1, 3, 1, 1, 1)
+            inputs = inputs / nf
+            targets = targets / nf
             
             preds, (mean, logvar) = vae(inputs)
             
@@ -248,9 +282,10 @@ def main():
                 inputs = velocity
                 targets = inputs.clone()  # Autoencoder: reconstruct the same input
                 
-                # Normalize both inputs and targets to [0,1]
-                inputs = inputs / max_velocity
-                targets = targets / max_velocity
+                # Normalize to [0,1] using per-component or global normalization
+                nf = norm_factors.to(args.device).view(1, 3, 1, 1, 1)
+                inputs = inputs / nf
+                targets = targets / nf
 
                 # noise = torch.randn(
                 #     latent_shape, generator=generator, device=device
@@ -320,7 +355,8 @@ def main():
             velocity = data['velocity'].to(args.device)
             is_2d = data['is_2d']
             
-            inputs = velocity / max_velocity
+            nf = norm_factors.to(args.device).view(1, 3, 1, 1, 1)
+            inputs = velocity / nf
             targets = inputs.clone()
             
             preds, (mean, logvar) = vae(inputs)
