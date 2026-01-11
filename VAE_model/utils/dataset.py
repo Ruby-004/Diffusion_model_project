@@ -185,15 +185,17 @@ class MicroFlowDataset(Dataset):
 
     def _save_statistics(self):
         """
-        Save dataset statistics.
-
+        Save dataset statistics including per-component velocity max values.
         """
+        velocity = self.data.get('velocity', torch.tensor(0.0))
+        velocity_input = self.data.get('velocity_input', torch.tensor(0.0))
+        
         stats = {
             'U_2d': {
-                'max': self.data.get('velocity_input', torch.tensor(0.0)).abs().max().item()
+                'max': velocity_input.abs().max().item() if velocity_input.numel() > 0 else 0.0
             },
             'U': {
-                'max': self.data.get('velocity', torch.tensor(0.0)).abs().max().item()
+                'max': velocity.abs().max().item() if velocity.numel() > 0 else 0.0
             },
             'p': {
                 'max': self.data.get('pressure', torch.tensor(0.0)).abs().max().item()
@@ -202,11 +204,27 @@ class MicroFlowDataset(Dataset):
                 'max': self.data.get('dxyz', torch.tensor(0.0)).abs().max().item()
             },
         }
+        
+        # Add per-component max values for velocity (critical for w-component training)
+        # Velocity shape: (N, num_slices, 3, H, W) where channels are (vx, vy, vz)
+        if velocity.numel() > 0 and velocity.dim() >= 3:
+            stats['U_per_component'] = {
+                'max_u': velocity[:, :, 0, :, :].abs().max().item(),
+                'max_v': velocity[:, :, 1, :, :].abs().max().item(),
+                'max_w': velocity[:, :, 2, :, :].abs().max().item(),
+            }
+        
+        if velocity_input.numel() > 0 and velocity_input.dim() >= 3:
+            stats['U_2d_per_component'] = {
+                'max_u': velocity_input[:, :, 0, :, :].abs().max().item(),
+                'max_v': velocity_input[:, :, 1, :, :].abs().max().item(),
+                'max_w': velocity_input[:, :, 2, :, :].abs().max().item(),
+            }
 
         # save
         log_file = osp.join(self.root_dir, 'statistics.json')
         with open(log_file, 'w') as f:
-            json.dump(stats, f, indent=0)
+            json.dump(stats, f, indent=2)
 
     @staticmethod
     def _rotate_y_field(x: torch.Tensor):
@@ -284,13 +302,16 @@ class MicroFlowDatasetVAE(Dataset):
         self._save_statistics()
     
     def _save_statistics(self):
-        """Save dataset statistics."""
+        """Save dataset statistics including per-component velocity max values."""
+        velocity_2d = self.data.get('velocity_2d', torch.tensor(0.0))
+        velocity_3d = self.data.get('velocity_3d', torch.tensor(0.0))
+        
         stats = {
             'U_2d': {
-                'max': self.data.get('velocity_2d', torch.tensor(0.0)).abs().max().item()
+                'max': velocity_2d.abs().max().item() if velocity_2d.numel() > 0 else 0.0
             },
             'U': {
-                'max': self.data.get('velocity_3d', torch.tensor(0.0)).abs().max().item()
+                'max': velocity_3d.abs().max().item() if velocity_3d.numel() > 0 else 0.0
             },
             'p': {
                 'max': self.data.get('pressure', torch.tensor(0.0)).abs().max().item()
@@ -300,10 +321,26 @@ class MicroFlowDatasetVAE(Dataset):
             },
         }
         
+        # Add per-component max values for velocity (critical for w-component training)
+        # Velocity shape: (N, num_slices, 3, H, W) where channels are (vx, vy, vz)
+        if velocity_3d.numel() > 0 and velocity_3d.dim() >= 3:
+            stats['U_per_component'] = {
+                'max_u': velocity_3d[:, :, 0, :, :].abs().max().item(),
+                'max_v': velocity_3d[:, :, 1, :, :].abs().max().item(),
+                'max_w': velocity_3d[:, :, 2, :, :].abs().max().item(),
+            }
+        
+        if velocity_2d.numel() > 0 and velocity_2d.dim() >= 3:
+            stats['U_2d_per_component'] = {
+                'max_u': velocity_2d[:, :, 0, :, :].abs().max().item(),
+                'max_v': velocity_2d[:, :, 1, :, :].abs().max().item(),
+                'max_w': velocity_2d[:, :, 2, :, :].abs().max().item(),
+            }
+        
         # Save
         log_file = osp.join(self.root_dir, 'statistics.json')
         with open(log_file, 'w') as f:
-            json.dump(stats, f, indent=0)
+            json.dump(stats, f, indent=2)
     
     def __len__(self):
         # Return DOUBLE the number of samples (one for each U_2d, one for each U)

@@ -12,14 +12,26 @@ class Encoder(nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        kernel_size: int = 3
+        kernel_size: int = 3,
+        conditional: bool = False
     ):
         super().__init__()
 
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kernel_size = kernel_size
+        self.conditional = conditional
         padding = get_padding(self.kernel_size)
+        
+        # Condition embedding: maps is_3d (0 or 1) to a per-channel bias
+        # This allows the encoder to learn different representations for 2D vs 3D flow
+        if self.conditional:
+            # Embed condition into same number of channels as first conv output
+            self.cond_embed = nn.Sequential(
+                nn.Linear(1, 64),
+                nn.SiLU(),
+                nn.Linear(64, 128)  # Output matches first conv layer's output channels
+            )
 
         # Use asymmetric stride to preserve depth dimension for z-flow accuracy
         # Only downsample in H and W, NOT in depth D
@@ -62,10 +74,18 @@ class Encoder(nn.Module):
 
     def forward(
         self,
-        x: torch.Tensor, # (B, in_channels, D, H, W)
-        # noise: torch.Tensor # (B, out_channels, D, H/4, W/4) - depth preserved!
+        x: torch.Tensor,  # (B, in_channels, D, H, W)
+        condition: torch.Tensor = None  # (B,) boolean tensor: True=3D flow, False=2D flow
     ):
-
+        """
+        Forward pass through encoder.
+        
+        Args:
+            x: Input velocity field (B, in_channels, D, H, W)
+            condition: Optional boolean tensor (B,) where True=3D flow (U), False=2D flow (U_2d)
+                       Only used if self.conditional=True
+        """
+        first_layer = True
         for module in self.layers:
             if getattr(module, 'stride', None) == (1, 2, 2):
                 # for layers where we down-scale with stride (1,2,2),
@@ -76,6 +96,15 @@ class Encoder(nn.Module):
                 x = F.pad(x, (left, right, top, bottom, front, back))
 
             x = module(x)
+            
+            # Inject condition after first conv layer
+            if first_layer and self.conditional and condition is not None:
+                first_layer = False
+                # condition: (B,) -> (B, 1) -> embed -> (B, 128) -> (B, 128, 1, 1, 1)
+                cond_float = condition.float().unsqueeze(-1)  # (B, 1)
+                cond_bias = self.cond_embed(cond_float)  # (B, 128)
+                cond_bias = cond_bias.view(x.shape[0], -1, 1, 1, 1)  # (B, 128, 1, 1, 1)
+                x = x + cond_bias  # Broadcast across D, H, W
         
         # from (B, C, d, h, w) -> 2 tensors of shape (B, C/2, d, h, w)
         mu, log_var = torch.chunk(x, 2, dim=1)

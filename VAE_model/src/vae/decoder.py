@@ -12,14 +12,26 @@ class Decoder(nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        kernel_size: int = 3
+        kernel_size: int = 3,
+        conditional: bool = False
     ):
         super().__init__()
 
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kernel_size = kernel_size
+        self.conditional = conditional
         padding = get_padding(self.kernel_size)
+        
+        # Condition embedding: maps is_3d (0 or 1) to a per-channel bias
+        # This allows the decoder to specialize output for 2D vs 3D flow
+        if self.conditional:
+            # Embed condition into same number of channels as first conv output
+            self.cond_embed = nn.Sequential(
+                nn.Linear(1, 64),
+                nn.SiLU(),
+                nn.Linear(64, 512)  # Output matches first conv layer's output channels
+            )
 
 
         # Use asymmetric upsampling to match encoder - preserve depth dimension
@@ -69,10 +81,31 @@ class Decoder(nn.Module):
 
         print(f'Trainable parameters: {self.trainable_params}.')
 
-    def forward(self, x: torch.Tensor):
-
+    def forward(
+        self,
+        x: torch.Tensor,
+        condition: torch.Tensor = None  # (B,) boolean tensor: True=3D flow, False=2D flow
+    ):
+        """
+        Forward pass through decoder.
+        
+        Args:
+            x: Latent representation (B, latent_channels, D, H/4, W/4)
+            condition: Optional boolean tensor (B,) where True=3D flow (U), False=2D flow (U_2d)
+                       Only used if self.conditional=True
+        """
+        first_layer = True
         for module in self.layers:
             x = module(x)
+            
+            # Inject condition after first conv layer
+            if first_layer and self.conditional and condition is not None:
+                first_layer = False
+                # condition: (B,) -> (B, 1) -> embed -> (B, 512) -> (B, 512, 1, 1, 1)
+                cond_float = condition.float().unsqueeze(-1)  # (B, 1)
+                cond_bias = self.cond_embed(cond_float)  # (B, 512)
+                cond_bias = cond_bias.view(x.shape[0], -1, 1, 1, 1)  # (B, 512, 1, 1, 1)
+                x = x + cond_bias  # Broadcast across D, H, W
 
         return x
 

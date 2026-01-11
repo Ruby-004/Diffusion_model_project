@@ -138,12 +138,21 @@ def main():
         if 'U_per_component' in statistics:
             print(f"  TIP: Use --per-component-norm for better w-component training")
         print(f"======================================\n")
+    
+    # Conditional VAE mode
+    use_conditional = args.conditional
+    if use_conditional:
+        print(f"\n=== Conditional VAE Mode ===")
+        print(f"  The VAE will learn to distinguish 2D flow (U_2d, w=0) from 3D flow (U, w≠0)")
+        print(f"  Condition signal: is_3d = True for U samples, False for U_2d samples")
+        print(f"==============================\n")
 
     """Model"""
 
     vae = VariationalAutoencoder(
         in_channels=args.in_channels,
-        latent_channels=args.latent_channels
+        latent_channels=args.latent_channels,
+        conditional=use_conditional
     )
     # encoder = Encoder(
     #     in_channels=IN_CHANNELS, out_channels=MID_CHANNELS
@@ -176,6 +185,7 @@ def main():
         'latent_channels': args.latent_channels,
         'per_component_norm': use_per_component,
         'norm_factors': norm_factors.tolist(),  # [max_u, max_v, max_w] for decoding
+        'conditional': use_conditional,  # Whether VAE uses conditioning
     }
     
     for epoch in range(args.num_epochs):
@@ -204,6 +214,10 @@ def main():
             velocity = data['velocity'].to(args.device)  # Either U_2d or U (3 channels)
             is_2d = data['is_2d']  # Boolean flag indicating if this is 2D flow
             
+            # Condition for conditional VAE: is_3d = NOT is_2d
+            # True = 3D flow (U, w≠0), False = 2D flow (U_2d, w=0)
+            is_3d = (~is_2d).to(args.device) if use_conditional else None
+            
             # Keep 3D structure for Conv3d layers: [batch, 3, depth, height, width]
             inputs = velocity
             targets = inputs.clone()  # Autoencoder: reconstruct the same input
@@ -214,7 +228,7 @@ def main():
             inputs = inputs / nf
             targets = targets / nf
             
-            preds, (mean, logvar) = vae(inputs)
+            preds, (mean, logvar) = vae(inputs, condition=is_3d)
             
             # logvar is already clamped inside the model's encode method
             
@@ -278,6 +292,9 @@ def main():
                 velocity = data['velocity'].to(args.device)  # Either U_2d or U (3 channels)
                 is_2d = data['is_2d']  # Boolean flag indicating if this is 2D flow
                 
+                # Condition for conditional VAE: is_3d = NOT is_2d
+                is_3d = (~is_2d).to(args.device) if use_conditional else None
+                
                 # Keep 3D structure for Conv3d layers: [batch, 3, depth, height, width]
                 inputs = velocity
                 targets = inputs.clone()  # Autoencoder: reconstruct the same input
@@ -290,7 +307,7 @@ def main():
                 # noise = torch.randn(
                 #     latent_shape, generator=generator, device=device
                 # )
-                preds, (mean, logvar) = vae(inputs)
+                preds, (mean, logvar) = vae(inputs, condition=is_3d)
                 
                 # logvar is already clamped
                 
@@ -355,11 +372,14 @@ def main():
             velocity = data['velocity'].to(args.device)
             is_2d = data['is_2d']
             
+            # Condition for conditional VAE: is_3d = NOT is_2d
+            is_3d = (~is_2d).to(args.device) if use_conditional else None
+            
             nf = norm_factors.to(args.device).view(1, 3, 1, 1, 1)
             inputs = velocity / nf
             targets = inputs.clone()
             
-            preds, (mean, logvar) = vae(inputs)
+            preds, (mean, logvar) = vae(inputs, condition=is_3d)
             # logvar is clamped in model
             
             preds = preds * mask

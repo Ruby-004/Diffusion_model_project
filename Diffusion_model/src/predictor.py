@@ -231,19 +231,27 @@ class LatentDiffusionPredictor(Predictor):
         # Load VAE config to get norm_factors
         vae_log_path = osp.join(vae_path, 'vae_log.json')
         vae_norm_factors = None
+        vae_conditional = False  # Whether VAE uses conditioning
         if osp.exists(vae_log_path):
             with open(vae_log_path, 'r') as f:
                 vae_log = json.load(f)
             if 'norm_factors' in vae_log:
                 vae_norm_factors = vae_log['norm_factors']
                 print(f"Loaded VAE norm_factors: {vae_norm_factors}")
+            if 'conditional' in vae_log:
+                vae_conditional = vae_log['conditional']
+                print(f"Loaded VAE conditional mode: {vae_conditional}")
+        
+        # Store conditional flag for use in encode/decode
+        self.vae_conditional = vae_conditional
         
         # Load VAE with correct architecture (3 input channels from velocity only)
         # Use latent_channels from model_kwargs if provided (should match output channels)
         self.vae = VariationalAutoencoder.from_directory(
             vae_path, 
             in_channels=3,  # 3 channels: velocity (vx, vy, vz)
-            latent_channels=latent_channels
+            latent_channels=latent_channels,
+            conditional=vae_conditional
         )
         
         # Update output normalizer with VAE's norm_factors if available
@@ -305,7 +313,8 @@ class LatentDiffusionPredictor(Predictor):
         with torch.no_grad():
             # Create dummy input: (batch, channels, depth, height, width)
             dummy_5d = torch.zeros(1, 3, num_slices, img.shape[3], img.shape[4]).to(device)
-            latent_shape = self.vae.encoder(dummy_5d)[0].shape  # (1, latent_channels, depth, H/4, W/4) - depth preserved!
+            dummy_condition = torch.zeros(1, dtype=torch.bool, device=device) if self.vae_conditional else None
+            latent_shape = self.vae.encoder(dummy_5d, condition=dummy_condition)[0].shape  # (1, latent_channels, depth, H/4, W/4) - depth preserved!
             latent_channels = latent_shape[1]
             latent_depth = latent_shape[2]
             latent_h, latent_w = latent_shape[3], latent_shape[4]
@@ -314,9 +323,12 @@ class LatentDiffusionPredictor(Predictor):
         # Permute to (batch, channels, num_slices, H, W) for 3D VAE
         velocity_2d_permuted = velocity_2d.permute(0, 2, 1, 3, 4)  # (batch, 3, num_slices, H, W)
         
-        # Encode using 3D VAE
+        # Encode using 3D VAE with condition=False (U_2d has w=0)
+        # The condition tells the VAE this is 2D flow data
         with torch.no_grad():
-            velocity_2d_latent_5d, _ = self.vae.encode(velocity_2d_permuted)  # (batch, latent_channels, depth, H/4, W/4) - depth preserved!
+            # For conditional VAE: is_3d=False for U_2d (2D flow with w=0)
+            condition_2d = torch.zeros(batch_size, dtype=torch.bool, device=device) if self.vae_conditional else None
+            velocity_2d_latent_5d, _ = self.vae.encode(velocity_2d_permuted, condition=condition_2d)  # (batch, latent_channels, depth, H/4, W/4) - depth preserved!
         
         # Permute to (batch, depth, latent_channels, H, W)
         velocity_2d_latent = velocity_2d_latent_5d.permute(0, 2, 1, 3, 4)
@@ -411,7 +423,8 @@ class LatentDiffusionPredictor(Predictor):
         # Get dimensions
         with torch.no_grad():
              dummy_5d = torch.zeros(1, 3, num_slices, img.shape[3], img.shape[4]).to(device)
-             latent_shape = self.vae.encoder(dummy_5d)[0].shape
+             dummy_condition = torch.zeros(1, dtype=torch.bool, device=device) if self.vae_conditional else None
+             latent_shape = self.vae.encoder(dummy_5d, condition=dummy_condition)[0].shape
              latent_channels = latent_shape[1]
              latent_depth = latent_shape[2]
              latent_h, latent_w = latent_shape[3], latent_shape[4]
@@ -419,7 +432,9 @@ class LatentDiffusionPredictor(Predictor):
         # Prepare conditioning (Copy from forward)
         velocity_2d_permuted = velocity_2d.permute(0, 2, 1, 3, 4)
         with torch.no_grad():
-            velocity_2d_latent_5d, _ = self.vae.encode(velocity_2d_permuted)
+            # For conditional VAE: is_3d=False for U_2d (2D flow with w=0)
+            condition_2d = torch.zeros(batch_size, dtype=torch.bool, device=device) if self.vae_conditional else None
+            velocity_2d_latent_5d, _ = self.vae.encode(velocity_2d_permuted, condition=condition_2d)
         velocity_2d_latent = velocity_2d_latent_5d.permute(0, 2, 1, 3, 4)
         
         feats_flat = self.pre_process(img_flat)
@@ -464,7 +479,9 @@ class LatentDiffusionPredictor(Predictor):
         predicted_latents_5d = predicted_latents.permute(0, 2, 1, 3, 4)
         
         with torch.no_grad():
-            velocity_5d = self.vae.decode(predicted_latents_5d)
+            # For conditional VAE: is_3d=True for output (we want 3D flow with w≠0)
+            condition_3d = torch.ones(batch_size, dtype=torch.bool, device=device) if self.vae_conditional else None
+            velocity_5d = self.vae.decode(predicted_latents_5d, condition=condition_3d)
         
         # Permute back to (batch, num_slices, 3, H, W)
         velocity_3d = velocity_5d.permute(0, 2, 1, 3, 4)
@@ -545,13 +562,13 @@ class LatentDiffusionPredictor(Predictor):
         velocity_norm_5d = velocity_flat_norm.reshape(batch_size, depth, channels, height, width).permute(0, 2, 1, 3, 4)
         
         # Encode with VAE (no gradient through VAE)
+        # For conditional VAE: is_3d=True for target U (3D flow with w≠0)
         with torch.no_grad():
-            latent_5d, _ = self.vae.encode(velocity_norm_5d)  # (batch, latent_channels, depth/4, H/4, W/4)
+            condition_3d = torch.ones(batch_size, dtype=torch.bool, device=velocity_3d.device) if self.vae_conditional else None
+            latent_5d, _ = self.vae.encode(velocity_norm_5d, condition=condition_3d)  # (batch, latent_channels, depth/4, H/4, W/4)
         
         # Permute back to (batch, depth, latent_channels, H, W) to match expected output
         latents = latent_5d.permute(0, 2, 1, 3, 4)  # (batch, depth/4, latent_channels, H/4, W/4)
-        
-        return latents
         
         return latents
 

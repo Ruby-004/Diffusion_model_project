@@ -24,6 +24,7 @@ def main():
     parser.add_argument('model_path', type=str, help='Path to the trained diffusion model (directory or .pt file)')
     parser.add_argument('sample_path', type=str, nargs='?', default=None, help='Path to the input sample (.pt file). If not provided, uses a sample from the test set.')
     parser.add_argument('--vae-path', type=str, default=None, help='Path to the trained VAE model directory. If not provided, uses VAE path from model config.')
+    parser.add_argument('--dataset-dir', type=str, default=None, help='Path to the dataset directory (overrides config). Used to locate statistics.json and test samples.')
     parser.add_argument('--index', type=int, default=0, help='Index of the sample in the test set to use (only if sample_path is not provided). Default: 0')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu', help='Device to use')
     
@@ -57,18 +58,29 @@ def main():
 
     predictor_kwargs = config['training']['predictor']
     dataset_root = config['dataset']['root_dir']
+    # Override dataset root if provided via command line
+    if args.dataset_dir:
+        dataset_root = args.dataset_dir
+        print(f"Using dataset directory from command-line argument: {dataset_root}")
     
     # Locate statistics.json for normalization
-    # Priorities: 1. Dataset root from config, 2. Default data path, 3. Sample directory
+    # Priorities: 1. Dataset root from config/argsn
+    # Priorities: 1. Dataset root from config, 2. Default data path, 3. Sample directory (if provided)
+    norm_file = None
     if os.path.exists(os.path.join(dataset_root, 'statistics.json')):
         norm_file = os.path.join(dataset_root, 'statistics.json')
     elif os.path.exists(os.path.join(project_root, 'Diffusion_model', 'data', 'dataset', 'statistics.json')):
         norm_file = os.path.join(project_root, 'Diffusion_model', 'data', 'dataset', 'statistics.json')
+    elif args.sample_path is not None:
+        # Only try sample directory if sample_path was provided
+        sample_dir_norm = os.path.join(os.path.dirname(args.sample_path), 'statistics.json')
+        if os.path.exists(sample_dir_norm):
+            norm_file = sample_dir_norm
+    
+    if norm_file is None:
+        print("Warning: statistics.json not found. Fallback to None (may cause errors).")
     else:
-        norm_file = os.path.join(os.path.dirname(args.sample_path), 'statistics.json')
-        if not os.path.exists(norm_file):
-            print("Warning: statistics.json not found. Fallback to None (may cause errors).")
-            norm_file = None
+        print(f"Using statistics from: {norm_file}")
             
     # Fix VAE path in config if it was absolute path from another machine
     if 'vae_path' in predictor_kwargs:

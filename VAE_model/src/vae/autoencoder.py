@@ -11,6 +11,10 @@ from .decoder import Decoder
 class VariationalAutoencoder(nn.Module):
     """
     Variational autoencoder model combining Encoder and Decoder.
+    
+    Supports conditional mode where a boolean flag (is_3d) is passed to
+    distinguish between 2D flow (U_2d, w=0) and 3D flow (U, w≠0).
+    This creates a disentangled latent space for better w-component learning.
     """
     _model_filename = 'vae.pt'
     _log_filename = 'vae_log.json'
@@ -19,41 +23,58 @@ class VariationalAutoencoder(nn.Module):
         self,
         in_channels: int,
         latent_channels: int,
-        kernel_size: int = 3
+        kernel_size: int = 3,
+        conditional: bool = False
     ):
         super().__init__()
+        
+        self.conditional = conditional
 
         self.encoder = Encoder(
             in_channels=in_channels,
             out_channels=latent_channels,
-            kernel_size=kernel_size
+            kernel_size=kernel_size,
+            conditional=conditional
         )
 
         self.decoder = Decoder(
             in_channels=latent_channels,
             out_channels=in_channels,
-            kernel_size=kernel_size
+            kernel_size=kernel_size,
+            conditional=conditional
         )
 
-    def forward(self, x: torch.Tensor):
+    def forward(
+        self,
+        x: torch.Tensor,
+        condition: torch.Tensor = None
+    ):
         """
         Forward pass through the autoencoder.
+        
+        Args:
+            x: Input velocity field (B, in_channels, D, H, W)
+            condition: Optional boolean tensor (B,) where True=3D flow (U), False=2D flow (U_2d)
         """
 
         # Encode
-        latent, (mean, logvar) = self.encode(x)
+        latent, (mean, logvar) = self.encode(x, condition)
 
         # Decode
-        recons = self.decode(latent)
+        recons = self.decode(latent, condition)
 
         return recons, (mean, logvar)
 
-    def encode(self, x: torch.Tensor):
+    def encode(self, x: torch.Tensor, condition: torch.Tensor = None):
         """
         Encode input into latent representation.
+        
+        Args:
+            x: Input velocity field (B, in_channels, D, H, W)
+            condition: Optional boolean tensor (B,) where True=3D flow (U), False=2D flow (U_2d)
         """
         # encoding
-        mean, logvar = self.encoder(x)
+        mean, logvar = self.encoder(x, condition)
 
         # Clamping logvar to prevent numerical instability during sampling
         logvar = torch.clamp(logvar, min=-10.0, max=10.0)
@@ -63,12 +84,16 @@ class VariationalAutoencoder(nn.Module):
 
         return latent, (mean, logvar)
 
-    def decode(self, z: torch.Tensor):
+    def decode(self, z: torch.Tensor, condition: torch.Tensor = None):
         """
         Decode latent representation into original space.
+        
+        Args:
+            z: Latent representation (B, latent_channels, D, H/4, W/4)
+            condition: Optional boolean tensor (B,) where True=3D flow (U), False=2D flow (U_2d)
         """
         # decode
-        recons = self.decoder(z)
+        recons = self.decoder(z, condition)
         return recons
 
     def save_model(self, folder, log: dict = None):
@@ -91,7 +116,7 @@ class VariationalAutoencoder(nn.Module):
         self.load_state_dict(torch.load(model_path, map_location=device))
     
     @classmethod
-    def from_directory(cls, folder, device=None, in_channels=None, latent_channels=None, kernel_size=3):
+    def from_directory(cls, folder, device=None, in_channels=None, latent_channels=None, kernel_size=3, conditional=None):
         """
         Create model instance from saved parameters.
         
@@ -101,6 +126,7 @@ class VariationalAutoencoder(nn.Module):
             in_channels: Number of input channels (if None, tries to read from log or defaults to 2)
             latent_channels: Number of latent channels (if None, tries to read from log or defaults to 4)
             kernel_size: Kernel size (default 3)
+            conditional: Whether VAE uses conditioning (if None, reads from log or defaults to False)
         """
         # Try to load log if it exists
         log_path = osp.join(folder, cls._log_filename)
@@ -116,6 +142,8 @@ class VariationalAutoencoder(nn.Module):
                     latent_channels = log['latent_channels']
                 if 'kernel_size' in log:
                     kernel_size = log['kernel_size']
+                if conditional is None and 'conditional' in log:
+                    conditional = log['conditional']
             except (json.JSONDecodeError, KeyError):
                 pass
         
@@ -124,15 +152,21 @@ class VariationalAutoencoder(nn.Module):
             in_channels = 2  # Default for velocity fields (vx, vy)
         if latent_channels is None:
             latent_channels = 4
+        if conditional is None:
+            conditional = False
 
         # create model
         model = cls(
             in_channels=in_channels,
             latent_channels=latent_channels,
-            kernel_size=kernel_size
+            kernel_size=kernel_size,
+            conditional=conditional
         )
 
         # load parameters
         model.load_model(folder, device=device)
-
+        
+        if conditional:
+            print(f"Loaded Conditional VAE from {folder}")
+        
         return model

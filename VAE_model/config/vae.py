@@ -51,6 +51,7 @@ parser.add_argument(
 parser.add_argument(
     '--augment',
     action='store_true',
+    default=False,
     help='Whether to use data augmentation.'
 )
 parser.add_argument(
@@ -66,15 +67,19 @@ parser.add_argument(
     help='Learning rate.'
 )
 parser.add_argument(
-    '--per-component-norm',
-    action='store_true',
-    default=True,
-    help='Use per-component normalization (max_u, max_v, max_w) instead of global max. '
-         'Recommended for 3D flow where w component has different scale than u/v.'
-)
-parser.add_argument(
     '--no-per-component-norm',
     dest='per_component_norm',
     action='store_false',
-    help='Disable per-component normalization and use global max instead (legacy behavior).'
+    default=True,
+    help='Disable per-component normalization and use global max instead (legacy behavior). '
+         'Per-component normalization is ENABLED by default and recommended for 3D flow.'
+)
+
+parser.add_argument(
+    '--conditional',
+    action='store_true',
+    default=False,
+    help='Enable conditional VAE mode. Injects is_3d condition signal to encoder/decoder '
+         'to create separate latent representations for 2D flow (U_2d, w=0) vs 3D flow (U, w≠0). '
+         'This helps the model learn to distinguish w=0 inputs from w≠0 outputs.'
 )
