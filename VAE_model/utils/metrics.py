@@ -37,6 +37,69 @@ def normalized_mae_loss(
     return error
 
 
+def mae_loss_per_channel(
+    output: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor = None,
+    weight_per_channel: torch.Tensor = None,
+    reduce=True
+) -> torch.Tensor:
+    """
+    MAE computed per-channel for VAE training.
+    
+    This gives the model component-specific feedback by computing loss
+    separately for each velocity component (u, v, w) before averaging.
+    This prevents the larger u/v components from dominating the loss
+    and ignoring the smaller w-component.
+    
+    Args:
+        output: (B, C, D, H, W) or (B, C, H, W) predicted velocity
+        target: Same shape as output - target velocity
+        mask: (B, 1, D, H, W) or (B, 1, H, W) fluid mask (optional)
+        weight_per_channel: Optional (C,) weights for each channel
+        reduce: Whether to average over batch
+        
+    Returns:
+        Scalar loss if reduce=True, else (B,) tensor
+    """
+    if mask is not None:
+        # Apply mask to both
+        mask_expanded = mask.expand_as(output)
+        output = output * mask_expanded
+        target = target * mask_expanded
+    
+    # Determine spatial dimensions based on tensor rank
+    if output.dim() == 5:
+        # 3D: (B, C, D, H, W)
+        spatial_dims = (-3, -2, -1)
+    elif output.dim() == 4:
+        # 2D: (B, C, H, W)
+        spatial_dims = (-2, -1)
+    else:
+        raise ValueError(f"Expected 4D or 5D tensor, got {output.dim()}D")
+    
+    # Compute MAE per channel: (B, C)
+    loss_per_channel = torch.mean(
+        torch.abs(output - target),
+        dim=spatial_dims
+    )
+    
+    # Apply channel weights if provided
+    if weight_per_channel is not None:
+        if weight_per_channel.dim() == 1:
+            weight_per_channel = weight_per_channel.unsqueeze(0)
+        loss_per_channel = loss_per_channel * weight_per_channel
+        loss_per_channel = loss_per_channel / weight_per_channel.sum()
+    
+    # Average over channels: (B,)
+    loss = torch.mean(loss_per_channel, dim=-1)
+    
+    if reduce:
+        loss = loss.mean()
+    
+    return loss
+
+
 def kl_divergence(
     mu: torch.Tensor,
     *,

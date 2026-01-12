@@ -10,7 +10,7 @@ import torch.optim as optim
 # from src.vae.decoder import Decoder
 from src.vae.autoencoder import VariationalAutoencoder
 from utils.dataset import get_loader
-from utils.metrics import normalized_mae_loss, kl_divergence
+from utils.metrics import normalized_mae_loss, kl_divergence, mae_loss_per_channel
 
 from config.vae import parser
 
@@ -235,12 +235,9 @@ def main():
             preds = preds * mask
             targets = targets * mask
 
-            # Expand mask to match channel dimension [B,1,D,H,W] -> [B,3,D,H,W]
-            mask_expanded = mask.expand_as(preds)
-            # Use simple MAE since inputs are normalized to [0,1]
-            fluid_preds = preds[mask_expanded > 0.5]
-            fluid_targets = targets[mask_expanded > 0.5]
-            reconstruction_loss = torch.mean(torch.abs(fluid_preds - fluid_targets))
+            # Per-channel loss: computes MAE separately for u, v, w then averages
+            # This prevents larger u/v components from dominating, ensuring w-component is learned
+            reconstruction_loss = mae_loss_per_channel(preds, targets, mask=mask)
             kl_loss = kl_divergence(mu=mean, logvar=logvar)
             loss = (reconstruction_loss + kl_coeff * kl_loss) / gradient_accumulation_steps
             
@@ -314,17 +311,8 @@ def main():
                 preds = preds * mask
                 targets = targets * mask
                 
-                # mean, logvar = encoder(targets)
-                # # sample
-                # latents = encoder.sample(mu=mean, logvar=logvar)
-                # preds = decoder(latents) * mask
-
-                # Expand mask to match channel dimension [B,1,D,H,W] -> [B,3,D,H,W]
-                mask_expanded = mask.expand_as(preds)
-                # Use simple MAE since inputs are normalized to [0,1]
-                fluid_preds = preds[mask_expanded > 0.5]
-                fluid_targets = targets[mask_expanded > 0.5]
-                reconstruction_loss = torch.mean(torch.abs(fluid_preds - fluid_targets))
+                # Per-channel loss: computes MAE separately for u, v, w then averages
+                reconstruction_loss = mae_loss_per_channel(preds, targets, mask=mask)
                 kl_loss = kl_divergence(mu=mean, logvar=logvar)
                 loss = reconstruction_loss + kl_coeff * kl_loss
                 
@@ -385,10 +373,8 @@ def main():
             preds = preds * mask
             targets = targets * mask
             
-            mask_expanded = mask.expand_as(preds)
-            fluid_preds = preds[mask_expanded > 0.5]
-            fluid_targets = targets[mask_expanded > 0.5]
-            reconstruction_loss = torch.mean(torch.abs(fluid_preds - fluid_targets))
+            # Per-channel loss: computes MAE separately for u, v, w then averages
+            reconstruction_loss = mae_loss_per_channel(preds, targets, mask=mask)
             kl_loss = kl_divergence(mu=mean, logvar=logvar)
             
             num_2d = is_2d.sum().item()
