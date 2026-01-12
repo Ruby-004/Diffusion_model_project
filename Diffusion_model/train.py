@@ -42,10 +42,18 @@ def train(
             'flow_rate_cv': [],
             'vel_in_solid': [],
             'vel_mean_fluid': [],
+            'gradient_smooth': [],
+            'laplacian_smooth': [],
+            'vel_u_mean': [],
+            'vel_v_mean': [],
+            'vel_w_mean': [],
+            'vel_u_max': [],
+            'vel_v_max': [],
+            'vel_w_max': [],
             'loss_divergence': [],
             'loss_flow_rate': [],
-            'loss_no_slip': [],
-            'loss_smoothness': []
+            'loss_smoothness': [],
+            'loss_laplacian': []
         }
     }
     log_folder = make_log_folder(param_dict)
@@ -72,13 +80,14 @@ def train(
     weight_u = train_dict.get('weight_u', 1.0)
     weight_v = train_dict.get('weight_v', 1.0)
     weight_w = train_dict.get('weight_w', 1.0)
+    velocity_loss_primary = train_dict.get('velocity_loss_primary', False)
     
     predictor_type = train_dict['predictor_type']
     predictor_kwargs = train_dict['predictor']
     
     # Print physics configuration
     physics_enabled = any([lambda_div > 0, lambda_flow > 0, lambda_smooth > 0, lambda_laplacian > 0])
-    velocity_loss_enabled = lambda_velocity > 0
+    velocity_loss_enabled = lambda_velocity > 0 or velocity_loss_primary
     if physics_enabled:
         print("\n=== Physics-Informed Training Enabled ===")
         print(f"  lambda_div (mass conservation): {lambda_div}")
@@ -90,7 +99,10 @@ def train(
     
     if velocity_loss_enabled:
         print("\n=== Component-Weighted Velocity Loss Enabled ===")
-        print(f"  lambda_velocity: {lambda_velocity}")
+        if velocity_loss_primary:
+            print(f"  MODE: PRIMARY LOSS (replaces noise prediction loss)")
+        else:
+            print(f"  MODE: AUXILIARY (lambda_velocity={lambda_velocity})")
         print(f"  weight_u (vx): {weight_u}")
         print(f"  weight_v (vy): {weight_v}")
         print(f"  weight_w (vz): {weight_w}")
@@ -138,7 +150,8 @@ def train(
             lambda_velocity=lambda_velocity,
             weight_u=weight_u,
             weight_v=weight_v,
-            weight_w=weight_w
+            weight_w=weight_w,
+            velocity_loss_primary=velocity_loss_primary
         )
         dtime = time.time() - start_time
 
@@ -175,8 +188,16 @@ def train(
         print(f"Epoch {epoch}: train_loss={avg_train_loss:.6f} | val_loss={avg_val_loss:.6f} | time={dtime:.2f} s")
         if physics_enabled and physics_metrics:
             print(f"  Physics: div_mean={physics_metrics.get('div_mean', 0):.6f} | "
-                  f"flow_cv={physics_metrics.get('flow_rate_cv', 0):.6f} | "
-                  f"vel_solid={physics_metrics.get('vel_in_solid', 0):.6f}")
+                  f"flow_cv={physics_metrics.get('flow_rate_cv', 0):.6f}")
+            print(f"  Smooth:  grad={physics_metrics.get('gradient_smooth', 0):.2e} | "
+                  f"lapl={physics_metrics.get('laplacian_smooth', 0):.2e}")
+            # Print velocity component stats for debugging
+            print(f"  Velocity: u_mean={physics_metrics.get('vel_u_mean', 0):.2e} | "
+                  f"v_mean={physics_metrics.get('vel_v_mean', 0):.2e} | "
+                  f"w_mean={physics_metrics.get('vel_w_mean', 0):.2e}")
+            print(f"           u_max={physics_metrics.get('vel_u_max', 0):.2e} | "
+                  f"v_max={physics_metrics.get('vel_v_max', 0):.2e} | "
+                  f"w_max={physics_metrics.get('vel_w_max', 0):.2e}")
         
         if scheduler is not None: scheduler.step()
 

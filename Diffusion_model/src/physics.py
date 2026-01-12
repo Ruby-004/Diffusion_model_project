@@ -56,7 +56,8 @@ class PhysicsLoss:
         lambda_flow: float = 0.0,
         lambda_smooth: float = 0.0,
         lambda_laplacian: float = 0.0,
-        eps: float = 1e-8
+        eps: float = 1e-8,
+        normalize_smoothness: bool = True
     ):
         """
         Args:
@@ -65,12 +66,15 @@ class PhysicsLoss:
             lambda_smooth: Weight for gradient smoothness regularization
             lambda_laplacian: Weight for Laplacian smoothness (reduces high-freq noise)
             eps: Small constant for numerical stability
+            normalize_smoothness: If True, normalize smoothness losses by velocity magnitude
+                                  to make them scale-invariant (recommended for small velocities)
         """
         self.lambda_div = lambda_div
         self.lambda_flow = lambda_flow
         self.lambda_smooth = lambda_smooth
         self.lambda_laplacian = lambda_laplacian
         self.eps = eps
+        self.normalize_smoothness = normalize_smoothness
     
     def __call__(
         self,
@@ -111,13 +115,13 @@ class PhysicsLoss:
         
         # 3. Gradient smoothness regularization
         if self.lambda_smooth > 0:
-            loss_smooth = smoothness_loss(vel_5d, mask_5d, eps=self.eps)
+            loss_smooth = smoothness_loss(vel_5d, mask_5d, eps=self.eps, normalize=self.normalize_smoothness)
             total_loss = total_loss + self.lambda_smooth * loss_smooth
             components['smoothness'] = loss_smooth.detach()
         
         # 4. Laplacian smoothness (better for reducing high-frequency noise)
         if self.lambda_laplacian > 0:
-            loss_laplacian = laplacian_smoothness_loss(vel_5d, mask_5d, eps=self.eps)
+            loss_laplacian = laplacian_smoothness_loss(vel_5d, mask_5d, eps=self.eps, normalize=self.normalize_smoothness)
             total_loss = total_loss + self.lambda_laplacian * loss_laplacian
             components['laplacian'] = loss_laplacian.detach()
         
@@ -281,7 +285,8 @@ def no_slip_loss(
 def smoothness_loss(
     velocity: torch.Tensor,
     mask: torch.Tensor,
-    eps: float = 1e-8
+    eps: float = 1e-8,
+    normalize: bool = True
 ) -> torch.Tensor:
     """
     Penalize high-frequency noise in velocity field (Tikhonov regularization).
@@ -294,6 +299,7 @@ def smoothness_loss(
         velocity: (batch, 3, D, H, W) tensor with velocity components
         mask: (batch, 1, D, H, W) binary mask, 1=fluid, 0=solid
         eps: Small constant for numerical stability
+        normalize: If True, normalize by velocity magnitude squared (scale-invariant)
         
     Returns:
         Scalar smoothness loss
@@ -328,13 +334,19 @@ def smoothness_loss(
     
     loss = total_grad_sq / (count + eps)
     
+    # Normalize by velocity magnitude squared to make scale-invariant
+    if normalize:
+        vel_mag_sq = ((velocity * mask) ** 2).sum() / (mask.sum() * 3 + eps)
+        loss = loss / (vel_mag_sq + eps)
+    
     return loss
 
 
 def laplacian_smoothness_loss(
     velocity: torch.Tensor,
     mask: torch.Tensor,
-    eps: float = 1e-8
+    eps: float = 1e-8,
+    normalize: bool = True
 ) -> torch.Tensor:
     """
     Penalize Laplacian magnitude in velocity field for smoother flow.
@@ -352,6 +364,7 @@ def laplacian_smoothness_loss(
         velocity: (batch, 3, D, H, W) tensor with velocity components
         mask: (batch, 1, D, H, W) binary mask, 1=fluid, 0=solid
         eps: Small constant for numerical stability
+        normalize: If True, normalize by velocity magnitude squared (scale-invariant)
         
     Returns:
         Scalar Laplacian smoothness loss
@@ -401,13 +414,19 @@ def laplacian_smoothness_loss(
     
     loss = total_laplacian_sq / (count + eps)
     
+    # Normalize by velocity magnitude squared to make scale-invariant
+    if normalize:
+        vel_mag_sq = ((velocity * mask) ** 2).sum() / (mask.sum() * 3 + eps)
+        loss = loss / (vel_mag_sq + eps)
+    
     return loss
 
 
 def compute_physics_metrics(
     velocity: torch.Tensor,
     mask: torch.Tensor,
-    eps: float = 1e-8
+    eps: float = 1e-8,
+    verbose: bool = False
 ) -> Dict[str, float]:
     """
     Compute physics metrics for logging (detached, no gradients).
@@ -416,6 +435,7 @@ def compute_physics_metrics(
         velocity: (batch, num_slices, 3, H, W) or (batch, 3, D, H, W) velocity field
         mask: Binary fluid mask matching velocity shape
         eps: Small constant for numerical stability
+        verbose: If True, print debug information about velocity values
         
     Returns:
         Dictionary of physics metrics
@@ -430,7 +450,18 @@ def compute_physics_metrics(
             vel_5d = velocity
             mask_5d = mask
         
+        # Ensure mask is float for computations
+        mask_5d = mask_5d.float()
+        
         metrics = {}
+        
+        # Debug: print velocity statistics
+        if verbose:
+            print(f"  [DEBUG] velocity shape: {vel_5d.shape}, mask shape: {mask_5d.shape}")
+            print(f"  [DEBUG] vel u: min={vel_5d[:,0].min():.2e}, max={vel_5d[:,0].max():.2e}, mean={vel_5d[:,0].mean():.2e}")
+            print(f"  [DEBUG] vel v: min={vel_5d[:,1].min():.2e}, max={vel_5d[:,1].max():.2e}, mean={vel_5d[:,1].mean():.2e}")
+            print(f"  [DEBUG] vel w: min={vel_5d[:,2].min():.2e}, max={vel_5d[:,2].max():.2e}, mean={vel_5d[:,2].mean():.2e}")
+            print(f"  [DEBUG] mask sum: {mask_5d.sum():.0f}, fluid fraction: {mask_5d.mean():.3f}")
         
         # 1. Mean divergence magnitude in fluid
         try:
@@ -500,6 +531,70 @@ def compute_physics_metrics(
             metrics['vel_mean_fluid'] = (vel_mag_fluid.sum() / num_fluid).item()
         except Exception:
             metrics['vel_mean_fluid'] = 0.0
+        
+        # 5. Gradient smoothness (mean |∇u|² in fluid)
+        try:
+            total_grad_sq = 0.0
+            count = 0
+            for c in range(3):
+                vel_c = vel_5d[:, c:c+1, :, :, :]
+                grad_x = vel_c[:, :, :, :, 1:] - vel_c[:, :, :, :, :-1]
+                mask_x = mask_5d[:, :, :, :, 1:] * mask_5d[:, :, :, :, :-1]
+                grad_y = vel_c[:, :, :, 1:, :] - vel_c[:, :, :, :-1, :]
+                mask_y = mask_5d[:, :, :, 1:, :] * mask_5d[:, :, :, :-1, :]
+                grad_z = vel_c[:, :, 1:, :, :] - vel_c[:, :, :-1, :, :]
+                mask_z = mask_5d[:, :, 1:, :, :] * mask_5d[:, :, :-1, :, :]
+                
+                total_grad_sq += (grad_x ** 2 * mask_x).sum()
+                total_grad_sq += (grad_y ** 2 * mask_y).sum()
+                total_grad_sq += (grad_z ** 2 * mask_z).sum()
+                count += mask_x.sum() + mask_y.sum() + mask_z.sum()
+            
+            metrics['gradient_smooth'] = (total_grad_sq / (count + eps)).item()
+        except Exception:
+            metrics['gradient_smooth'] = 0.0
+        
+        # 6. Laplacian smoothness (mean |∇²u|² in fluid)
+        try:
+            total_laplacian_sq = 0.0
+            count = 0
+            for c in range(3):
+                vel_c = vel_5d[:, c:c+1, :, :, :]
+                d2_dx2 = vel_c[:, :, :, :, 2:] - 2 * vel_c[:, :, :, :, 1:-1] + vel_c[:, :, :, :, :-2]
+                d2_dy2 = vel_c[:, :, :, 2:, :] - 2 * vel_c[:, :, :, 1:-1, :] + vel_c[:, :, :, :-2, :]
+                d2_dz2 = vel_c[:, :, 2:, :, :] - 2 * vel_c[:, :, 1:-1, :, :] + vel_c[:, :, :-2, :, :]
+                
+                d2_dx2 = d2_dx2[:, :, 1:-1, 1:-1, :]
+                d2_dy2 = d2_dy2[:, :, 1:-1, :, 1:-1]
+                d2_dz2 = d2_dz2[:, :, :, 1:-1, 1:-1]
+                
+                laplacian = d2_dx2 + d2_dy2 + d2_dz2
+                mask_interior = mask_5d[:, :, 1:-1, 1:-1, 1:-1]
+                mask_valid = (
+                    mask_5d[:, :, 1:-1, 1:-1, :-2] * mask_5d[:, :, 1:-1, 1:-1, 1:-1] * mask_5d[:, :, 1:-1, 1:-1, 2:] *
+                    mask_5d[:, :, 1:-1, :-2, 1:-1] * mask_5d[:, :, 1:-1, 2:, 1:-1] *
+                    mask_5d[:, :, :-2, 1:-1, 1:-1] * mask_5d[:, :, 2:, 1:-1, 1:-1]
+                )
+                
+                laplacian_masked = laplacian * mask_valid
+                total_laplacian_sq += (laplacian_masked ** 2).sum()
+                count += mask_valid.sum()
+            
+            metrics['laplacian_smooth'] = (total_laplacian_sq / (count + eps)).item()
+        except Exception:
+            metrics['laplacian_smooth'] = 0.0
+        
+        # 7. Per-component velocity statistics (helps debug scaling issues)
+        try:
+            for c, name in enumerate(['vel_u', 'vel_v', 'vel_w']):
+                vel_c = vel_5d[:, c:c+1, :, :, :] * mask_5d
+                num_fluid = mask_5d.sum() + eps
+                metrics[f'{name}_mean'] = (vel_c.abs().sum() / num_fluid).item()
+                metrics[f'{name}_max'] = vel_c.abs().max().item()
+        except Exception:
+            for name in ['vel_u', 'vel_v', 'vel_w']:
+                metrics[f'{name}_mean'] = 0.0
+                metrics[f'{name}_max'] = 0.0
         
         return metrics
 

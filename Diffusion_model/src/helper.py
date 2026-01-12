@@ -168,7 +168,8 @@ def run_epoch(
     lambda_velocity: float = 0.0,
     weight_u: float = 1.0,
     weight_v: float = 1.0,
-    weight_w: float = 1.0
+    weight_w: float = 1.0,
+    velocity_loss_primary: bool = False
 ) -> tuple[float, float, Dict[str, float]]:
     """
     Optimize model for 1 epoch over training set, then evaluate over validation set.
@@ -188,6 +189,7 @@ def run_epoch(
         weight_u: Weight for u (vx) component in velocity loss.
         weight_v: Weight for v (vy) component in velocity loss.
         weight_w: Weight for w (vz) component in velocity loss.
+        velocity_loss_primary: If True, use velocity loss as primary instead of noise prediction.
         
     Returns:
         avg_train_loss: Average training loss.
@@ -209,10 +211,11 @@ def run_epoch(
         lambda_div=lambda_div,
         lambda_flow=lambda_flow,
         lambda_smooth=lambda_smooth,
-        lambda_laplacian=lambda_laplacian
+        lambda_laplacian=lambda_laplacian,
+        normalize_smoothness=True  # Enable scale-invariant smoothness losses
     )
     use_physics_loss = physics_loss_calc.is_active()
-    use_velocity_loss = lambda_velocity > 0
+    use_velocity_loss = lambda_velocity > 0 or velocity_loss_primary
 
     # Track physics metrics
     accumulated_physics_metrics = {
@@ -220,7 +223,15 @@ def run_epoch(
         'div_std': 0.0,
         'flow_rate_cv': 0.0,
         'vel_in_solid': 0.0,
-        'vel_mean_fluid': 0.0
+        'vel_mean_fluid': 0.0,
+        'gradient_smooth': 0.0,
+        'laplacian_smooth': 0.0,
+        'vel_u_mean': 0.0,
+        'vel_v_mean': 0.0,
+        'vel_w_mean': 0.0,
+        'vel_u_max': 0.0,
+        'vel_v_max': 0.0,
+        'vel_w_max': 0.0
     }
     physics_loss_components = {
         'divergence': 0.0,
@@ -283,53 +294,92 @@ def run_epoch(
             # Predict noise using forward pass
             preds, target_noise = predictor(img, velocity_2d, x_start=target_latents, noise=noise)
             
-            # Primary loss: noise prediction
-            loss = criterion(output=preds, target=target_noise)
+            # Primary loss: either noise prediction OR velocity-based
+            if velocity_loss_primary:
+                # Use per-channel velocity loss as primary
+                # Reconstruct velocity from noise prediction
+                velocity_pred = reconstruct_velocity_from_noise_pred(
+                    noise_pred=preds,
+                    x_t=x_t,
+                    t=t,
+                    scheduler=predictor.scheduler,
+                    vae_decoder=predictor.vae.decode,
+                    normalizer_output=predictor.normalizer['output'],
+                    batch_size=batch_size,
+                    latent_depth=latent_depth,
+                    latent_channels=latent_channels,
+                    latent_h=latent_h,
+                    latent_w=latent_w,
+                    num_slices=num_slices,
+                    img=img
+                )
+                
+                # Per-channel velocity loss as PRIMARY
+                loss, vel_components = component_weighted_velocity_loss(
+                    velocity_pred=velocity_pred,
+                    velocity_target=targets,
+                    mask=img,
+                    weight_u=weight_u,
+                    weight_v=weight_v,
+                    weight_w=weight_w
+                )
+                
+                # Accumulate component metrics for logging
+                for key in component_metrics:
+                    if key in vel_components:
+                        component_metrics[key] += vel_components[key].item()
+            else:
+                # Standard noise prediction loss
+                loss = criterion(output=preds, target=target_noise)
             
             # Physics-informed loss (computed periodically for efficiency)
             physics_loss = torch.tensor(0.0, device=device)
             velocity_loss = torch.tensor(0.0, device=device)
-            velocity_pred = None
+            velocity_pred_for_physics = None
             
-            if (use_physics_loss or use_velocity_loss) and (i % physics_loss_freq == 0):
+            # For physics loss or auxiliary velocity loss, reconstruct velocity if not already done
+            if (use_physics_loss or (use_velocity_loss and not velocity_loss_primary)) and (i % physics_loss_freq == 0):
                 try:
-                    # Reconstruct velocity from noise prediction for physics/velocity loss
-                    velocity_pred = reconstruct_velocity_from_noise_pred(
-                        noise_pred=preds,
-                        x_t=x_t,
-                        t=t,
-                        scheduler=predictor.scheduler,
-                        vae_decoder=predictor.vae.decode,
-                        normalizer_output=predictor.normalizer['output'],
-                        batch_size=batch_size,
-                        latent_depth=latent_depth,
-                        latent_channels=latent_channels,
-                        latent_h=latent_h,
-                        latent_w=latent_w,
-                        num_slices=num_slices,
-                        img=img
-                    )
+                    # Reconstruct velocity if not already done for primary loss
+                    if velocity_loss_primary:
+                        velocity_pred_for_physics = velocity_pred
+                    else:
+                        velocity_pred_for_physics = reconstruct_velocity_from_noise_pred(
+                            noise_pred=preds,
+                            x_t=x_t,
+                            t=t,
+                            scheduler=predictor.scheduler,
+                            vae_decoder=predictor.vae.decode,
+                            normalizer_output=predictor.normalizer['output'],
+                            batch_size=batch_size,
+                            latent_depth=latent_depth,
+                            latent_channels=latent_channels,
+                            latent_h=latent_h,
+                            latent_w=latent_w,
+                            num_slices=num_slices,
+                            img=img
+                        )
                     
                     # Compute physics loss
                     if use_physics_loss:
-                        physics_loss, components = physics_loss_calc(velocity_pred, img)
+                        physics_loss, components = physics_loss_calc(velocity_pred_for_physics, img)
                         
                         # Accumulate component losses for logging
                         for key in physics_loss_components:
                             if key in components:
                                 physics_loss_components[key] += components[key].item()
                     
-                    # Compute component-weighted velocity loss
-                    if use_velocity_loss:
-                        velocity_loss, vel_components = component_weighted_velocity_loss(
-                            velocity_pred=velocity_pred,
+                    # Compute auxiliary component-weighted velocity loss (only if not primary)
+                    if use_velocity_loss and not velocity_loss_primary and lambda_velocity > 0:
+                        aux_velocity_loss, vel_components = component_weighted_velocity_loss(
+                            velocity_pred=velocity_pred_for_physics,
                             velocity_target=targets,
                             mask=img,
                             weight_u=weight_u,
                             weight_v=weight_v,
                             weight_w=weight_w
                         )
-                        velocity_loss = lambda_velocity * velocity_loss
+                        velocity_loss = lambda_velocity * aux_velocity_loss
                         
                         # Accumulate component metrics for logging
                         for key in component_metrics:
@@ -433,8 +483,8 @@ def run_epoch(
                         img=img
                     )
                     
-                    # Compute physics metrics
-                    batch_metrics = compute_physics_metrics(velocity_pred, img)
+                    # Compute physics metrics (verbose on first batch only)
+                    batch_metrics = compute_physics_metrics(velocity_pred, img, verbose=(j == 0))
                     for key in accumulated_physics_metrics:
                         if key in batch_metrics:
                             accumulated_physics_metrics[key] += batch_metrics[key]
@@ -442,6 +492,8 @@ def run_epoch(
                     
                 except Exception as e:
                     print(f"Warning: Physics metrics computation failed: {e}")
+                    import traceback
+                    traceback.print_exc()
 
             else:
                 raise ValueError(f"Unknown option: {option}")

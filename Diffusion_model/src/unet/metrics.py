@@ -10,7 +10,11 @@ __all__ = [
     'mse_loss',
     'huber_loss',
     'normalized_mae_loss',
-    'divergence_loss'
+    'divergence_loss',
+    'mae_loss_per_component',
+    'normalized_mae_loss_per_component',
+    'mse_loss_per_component',
+    'normalized_mse_loss_per_component'
 ]
 
 
@@ -86,6 +90,62 @@ def mae_loss(
     return loss
 
 
+def mae_loss_per_component(
+    output: torch.Tensor,
+    target: torch.Tensor,
+    reduce=True,
+    weight_per_channel: torch.Tensor = None
+) -> torch.Tensor:
+    """
+    Mean Absolute Error computed per-channel, then averaged.
+    
+    This gives the model component-specific feedback by computing loss
+    separately for each velocity component (u, v, w) before averaging.
+    
+    Args:
+        output: Predicted tensor (batch, channels, height, width) or (batch, channels, depth, height, width)
+        target: Target tensor with same shape as output
+        reduce: Whether to take batch average
+        weight_per_channel: Optional per-channel weights (channels,). Default: equal weights.
+    
+    Returns:
+        Scalar loss
+    """
+    # Compute error per channel, averaging only over spatial dimensions
+    if output.dim() == 4:
+        # 2D: (batch, channels, height, width)
+        spatial_dims = (-2, -1)
+    elif output.dim() == 5:
+        # 3D: (batch, channels, depth, height, width)
+        spatial_dims = (-3, -2, -1)
+    else:
+        raise ValueError(f"Expected 4D or 5D tensor, got {output.dim()}D")
+    
+    # Compute MAE per channel: (batch, channels)
+    loss_per_channel = torch.mean(
+        torch.abs(output - target),
+        dim=spatial_dims
+    )
+    
+    # Apply channel weights if provided
+    if weight_per_channel is not None:
+        if weight_per_channel.dim() == 1:
+            # Broadcast to (1, channels)
+            weight_per_channel = weight_per_channel.unsqueeze(0)
+        loss_per_channel = loss_per_channel * weight_per_channel
+        # Normalize by sum of weights
+        loss_per_channel = loss_per_channel / weight_per_channel.sum()
+    
+    # Average over channels: (batch,)
+    loss = torch.mean(loss_per_channel, dim=-1)
+    
+    if reduce:
+        # Average over batch
+        loss = loss.mean()
+    
+    return loss
+
+
 def normalized_mae_loss(
     output: torch.Tensor,
     target: torch.Tensor,
@@ -117,6 +177,198 @@ def normalized_mae_loss(
         # average
         error = error.mean() # shape: (1)
 
+    return error
+
+
+def mse_loss_per_component(
+    output: torch.Tensor,
+    target: torch.Tensor,
+    reduce=True,
+    weight_per_channel: torch.Tensor = None
+) -> torch.Tensor:
+    """
+    Mean Squared Error computed per-channel, then averaged.
+    
+    This gives the model component-specific feedback by computing loss
+    separately for each velocity component (u, v, w) before averaging.
+    
+    Args:
+        output: Predicted tensor (batch, channels, height, width) or (batch, channels, depth, height, width)
+        target: Target tensor with same shape as output
+        reduce: Whether to take batch average
+        weight_per_channel: Optional per-channel weights (channels,). Default: equal weights.
+    
+    Returns:
+        Scalar loss
+    """
+    # Compute error per channel, averaging only over spatial dimensions
+    if output.dim() == 4:
+        # 2D: (batch, channels, height, width)
+        spatial_dims = (-2, -1)
+    elif output.dim() == 5:
+        # 3D: (batch, channels, depth, height, width)
+        spatial_dims = (-3, -2, -1)
+    else:
+        raise ValueError(f"Expected 4D or 5D tensor, got {output.dim()}D")
+    
+    # Compute MSE per channel: (batch, channels)
+    loss_per_channel = torch.mean(
+        (output - target)**2,
+        dim=spatial_dims
+    )
+    
+    # Apply channel weights if provided
+    if weight_per_channel is not None:
+        if weight_per_channel.dim() == 1:
+            # Broadcast to (1, channels)
+            weight_per_channel = weight_per_channel.unsqueeze(0)
+        loss_per_channel = loss_per_channel * weight_per_channel
+        # Normalize by sum of weights
+        loss_per_channel = loss_per_channel / weight_per_channel.sum()
+    
+    # Average over channels: (batch,)
+    loss = torch.mean(loss_per_channel, dim=-1)
+    
+    if reduce:
+        # Average over batch
+        loss = loss.mean()
+    
+    return loss
+
+
+def normalized_mae_loss_per_component(
+    output: torch.Tensor,
+    target: torch.Tensor,
+    reduce=True,
+    weight_per_channel: torch.Tensor = None,
+    eps: float = 1e-8
+) -> torch.Tensor:
+    """
+    Normalized Mean Absolute Error computed per-channel, then averaged.
+    
+    Each component is normalized by its own target magnitude, preventing
+    large-magnitude components from dominating the loss. This is critical
+    for 3D flow where vz is typically 9x smaller than vx/vy.
+    
+    Args:
+        output: Predicted tensor (batch, channels, height, width) or (batch, channels, depth, height, width)
+        target: Target tensor with same shape as output
+        reduce: Whether to take batch average
+        weight_per_channel: Optional per-channel weights (channels,). Default: equal weights.
+        eps: Small constant for numerical stability
+    
+    Returns:
+        Scalar loss
+    """
+    # Determine spatial dimensions
+    if output.dim() == 4:
+        # 2D: (batch, channels, height, width)
+        spatial_dims = (-2, -1)
+    elif output.dim() == 5:
+        # 3D: (batch, channels, depth, height, width)
+        spatial_dims = (-3, -2, -1)
+    else:
+        raise ValueError(f"Expected 4D or 5D tensor, got {output.dim()}D")
+    
+    # Compute MAE per channel: (batch, channels)
+    mae_per_channel = torch.mean(
+        torch.abs(output - target),
+        dim=spatial_dims
+    )
+    
+    # Compute normalization weight per channel: (batch, channels)
+    weight_per_channel_norm = torch.mean(
+        torch.abs(target),
+        dim=spatial_dims
+    )
+    
+    # Normalize each channel by its own magnitude
+    normalized_error_per_channel = mae_per_channel / (weight_per_channel_norm + eps)
+    
+    # Apply channel weights if provided
+    if weight_per_channel is not None:
+        if weight_per_channel.dim() == 1:
+            # Broadcast to (1, channels)
+            weight_per_channel = weight_per_channel.unsqueeze(0)
+        normalized_error_per_channel = normalized_error_per_channel * weight_per_channel
+        # Normalize by sum of weights
+        normalized_error_per_channel = normalized_error_per_channel / weight_per_channel.sum()
+    
+    # Average over channels: (batch,)
+    error = torch.mean(normalized_error_per_channel, dim=-1)
+    
+    if reduce:
+        # Average over batch
+        error = error.mean()
+    
+    return error
+
+
+def normalized_mse_loss_per_component(
+    output: torch.Tensor,
+    target: torch.Tensor,
+    reduce=True,
+    weight_per_channel: torch.Tensor = None,
+    eps: float = 1e-8
+) -> torch.Tensor:
+    """
+    Normalized Mean Squared Error computed per-channel, then averaged.
+    
+    Each component is normalized by its own target magnitude squared, preventing
+    large-magnitude components from dominating the loss. Similar to normalized_mae_loss_per_component
+    but uses squared error instead of absolute error.
+    
+    Args:
+        output: Predicted tensor (batch, channels, height, width) or (batch, channels, depth, height, width)
+        target: Target tensor with same shape as output
+        reduce: Whether to take batch average
+        weight_per_channel: Optional per-channel weights (channels,). Default: equal weights.
+        eps: Small constant for numerical stability
+    
+    Returns:
+        Scalar loss
+    """
+    # Determine spatial dimensions
+    if output.dim() == 4:
+        # 2D: (batch, channels, height, width)
+        spatial_dims = (-2, -1)
+    elif output.dim() == 5:
+        # 3D: (batch, channels, depth, height, width)
+        spatial_dims = (-3, -2, -1)
+    else:
+        raise ValueError(f"Expected 4D or 5D tensor, got {output.dim()}D")
+    
+    # Compute MSE per channel: (batch, channels)
+    mse_per_channel = torch.mean(
+        (output - target)**2,
+        dim=spatial_dims
+    )
+    
+    # Compute normalization weight per channel: mean squared magnitude (batch, channels)
+    weight_per_channel_norm = torch.mean(
+        target**2,
+        dim=spatial_dims
+    )
+    
+    # Normalize each channel by its own magnitude squared
+    normalized_error_per_channel = mse_per_channel / (weight_per_channel_norm + eps)
+    
+    # Apply channel weights if provided
+    if weight_per_channel is not None:
+        if weight_per_channel.dim() == 1:
+            # Broadcast to (1, channels)
+            weight_per_channel = weight_per_channel.unsqueeze(0)
+        normalized_error_per_channel = normalized_error_per_channel * weight_per_channel
+        # Normalize by sum of weights
+        normalized_error_per_channel = normalized_error_per_channel / weight_per_channel.sum()
+    
+    # Average over channels: (batch,)
+    error = torch.mean(normalized_error_per_channel, dim=-1)
+    
+    if reduce:
+        # Average over batch
+        error = error.mean()
+    
     return error
 
 

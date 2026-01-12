@@ -118,7 +118,7 @@ group_train.add_argument(
     '--cost-function',
     type=str,
     default='normalized_mae_loss',
-    choices=['normalized_mae_loss', 'normalized_mse_loss', 'normalized_exp_loss', 'mae_loss', 'mse_loss', 'huber_loss'],
+    choices=['normalized_mae_loss', 'normalized_mse_loss', 'normalized_exp_loss', 'mae_loss', 'mse_loss', 'huber_loss', 'normalized_mae_loss_per_component', 'mae_loss_per_component', 'normalized_mse_loss_per_component'],
     help='Cost function for training.'
 )
 group_train.add_argument(
@@ -175,6 +175,12 @@ group_train.add_argument(
     default=0.0,
     help='Weight for auxiliary velocity reconstruction loss (computed on decoded output). Recommended: 0.1-1.0'
 )
+group_train.add_argument(
+    '--velocity-loss-primary',
+    type=bool,
+    default=False,
+    help='If True, use per-channel velocity loss as PRIMARY loss instead of noise prediction. Slower but directly optimizes velocity channels.'
+)
 
 group_train.add_argument(
     '--predictor-type',
@@ -205,7 +211,7 @@ group_train.add_argument(
     '--features',
     type=int,
     nargs='+',
-    default=[64, 128, 256, 512],
+    default=[64, 128, 256, 512, 1024],
     help='Number of channels at each (depth) level in the U-Net architecture.'
 )
 group_train.add_argument(
@@ -368,6 +374,11 @@ def process_args(args: argparse.Namespace):
             'lambda_smooth': args.lambda_smooth,
             'lambda_laplacian': args.lambda_laplacian,
             'physics_loss_freq': args.physics_loss_freq,
+            'weight_u': args.weight_u,
+            'weight_v': args.weight_v,
+            'weight_w': args.weight_w,
+            'lambda_velocity': args.lambda_velocity,
+            'velocity_loss_primary': args.velocity_loss_primary,
             'predictor_type': args.predictor_type,
             'predictor': {
                 'model_name':args.model_name,

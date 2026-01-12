@@ -245,30 +245,72 @@ def main():
         # Add Prediction (Slices, 3, H, W)
         pred = to_numpy(prediction)
         
-        # Calculate Magnitude
-        pred_mag = np.sqrt(np.sum(pred**2, axis=1))
+        # Normalize each component independently for better visualization
+        # Physical velocities are very small (~0.001-0.01 m/s) and x >> y,z
+        pred_normalized = np.zeros_like(pred)
         
-        # Add components
-        # Channels: 0=x, 1=y, 2=z
-        viewer.add_image(pred[:, 0], name='Pred V_x', colormap='magma', rendering='iso', depiction='volume', scale=scale, blending='additive')
-        viewer.add_image(pred[:, 1], name='Pred V_y', colormap='magma', visible=False, rendering='iso', depiction='volume', scale=scale, blending='additive')
-        if pred.shape[1] > 2:
-            viewer.add_image(pred[:, 2], name='Pred V_z', colormap='magma', visible=False, rendering='iso', depiction='volume', scale=scale, blending='additive')
+        print("\nVelocity ranges (physical, m/s):")
+        for i, component in enumerate(['V_x', 'V_y', 'V_z'][:pred.shape[1]]):
+            comp_data = pred[:, i]
+            vmin, vmax = np.percentile(comp_data, [1, 99])
+            print(f"  {component}: [{comp_data.min():.6f}, {comp_data.max():.6f}] (p1-p99: [{vmin:.6f}, {vmax:.6f}])")
             
-        viewer.add_image(pred_mag, name='Pred Magnitude', colormap='turbo', visible=True, rendering='mip', depiction='volume', scale=scale, blending='additive')
+            # Normalize each component independently
+            if vmax > vmin:
+                pred_normalized[:, i] = (comp_data - vmin) / (vmax - vmin)
+            else:
+                pred_normalized[:, i] = comp_data
+        
+        # Calculate Magnitude (use original physical values)
+        pred_mag = np.sqrt(np.sum(pred**2, axis=1))
+        # Normalize magnitude separately
+        mag_min, mag_max = np.percentile(pred_mag, [1, 99])
+        if mag_max > mag_min:
+            pred_mag_normalized = (pred_mag - mag_min) / (mag_max - mag_min)
+        else:
+            pred_mag_normalized = pred_mag
+        
+        # Add components (each normalized to [0,1] independently)
+        # Channels: 0=x, 1=y, 2=z
+        viewer.add_image(pred_normalized[:, 0], name='Pred V_x', colormap='magma', rendering='iso', depiction='volume', scale=scale, blending='additive')
+        viewer.add_image(pred_normalized[:, 1], name='Pred V_y', colormap='magma', visible=False, rendering='iso', depiction='volume', scale=scale, blending='additive')
+        if pred.shape[1] > 2:
+            viewer.add_image(pred_normalized[:, 2], name='Pred V_z', colormap='magma', visible=False, rendering='iso', depiction='volume', scale=scale, blending='additive')
+            
+        viewer.add_image(pred_mag_normalized, name='Pred Magnitude', colormap='turbo', visible=True, rendering='mip', depiction='volume', scale=scale, blending='additive')
 
         # Add Target if available
         if target_velocity is not None:
             if target_velocity.dim() == 4: target_velocity = target_velocity.unsqueeze(0)
             target = to_numpy(target_velocity)
-            target_mag = np.sqrt(np.sum(target**2, axis=1))
             
-            viewer.add_image(target[:, 0], name='Target V_x', colormap='magma', visible=False, rendering='iso', depiction='volume', scale=scale)
-            viewer.add_image(target[:, 1], name='Target V_y', colormap='magma', visible=False, rendering='iso', depiction='volume', scale=scale)
-            if target.shape[1] > 2:
-                viewer.add_image(target[:, 2], name='Target V_z', colormap='magma', visible=False, rendering='iso', depiction='volume', scale=scale)
+            # Normalize each component independently (same as prediction)
+            target_normalized = np.zeros_like(target)
+            
+            print("\nTarget velocity ranges (physical, m/s):")
+            for i, component in enumerate(['V_x', 'V_y', 'V_z'][:target.shape[1]]):
+                comp_data = target[:, i]
+                vmin, vmax = np.percentile(comp_data, [1, 99])
+                print(f"  {component}: [{comp_data.min():.6f}, {comp_data.max():.6f}] (p1-p99: [{vmin:.6f}, {vmax:.6f}])")
                 
-            viewer.add_image(target_mag, name='Target Magnitude', colormap='turbo', visible=False, rendering='mip', depiction='volume', scale=scale)
+                if vmax > vmin:
+                    target_normalized[:, i] = (comp_data - vmin) / (vmax - vmin)
+                else:
+                    target_normalized[:, i] = comp_data
+            
+            target_mag = np.sqrt(np.sum(target**2, axis=1))
+            mag_min, mag_max = np.percentile(target_mag, [1, 99])
+            if mag_max > mag_min:
+                target_mag_normalized = (target_mag - mag_min) / (mag_max - mag_min)
+            else:
+                target_mag_normalized = target_mag
+            
+            viewer.add_image(target_normalized[:, 0], name='Target V_x', colormap='magma', visible=False, rendering='iso', depiction='volume', scale=scale)
+            viewer.add_image(target_normalized[:, 1], name='Target V_y', colormap='magma', visible=False, rendering='iso', depiction='volume', scale=scale)
+            if target.shape[1] > 2:
+                viewer.add_image(target_normalized[:, 2], name='Target V_z', colormap='magma', visible=False, rendering='iso', depiction='volume', scale=scale)
+                
+            viewer.add_image(target_mag_normalized, name='Target Magnitude', colormap='turbo', visible=False, rendering='mip', depiction='volume', scale=scale)
 
         print("Opening napari window...")
         # Switch to 3D display mode
