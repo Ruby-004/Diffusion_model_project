@@ -63,8 +63,8 @@ def train(
     # Physics loss parameters
     lambda_div = train_dict.get('lambda_div', 0.0)
     lambda_flow = train_dict.get('lambda_flow', 0.0)
-    lambda_bc = train_dict.get('lambda_bc', 0.0)
     lambda_smooth = train_dict.get('lambda_smooth', 0.0)
+    lambda_laplacian = train_dict.get('lambda_laplacian', 0.0)
     physics_loss_freq = train_dict.get('physics_loss_freq', 1)
     
     # Component weighting parameters
@@ -77,14 +77,14 @@ def train(
     predictor_kwargs = train_dict['predictor']
     
     # Print physics configuration
-    physics_enabled = any([lambda_div > 0, lambda_flow > 0, lambda_bc > 0, lambda_smooth > 0])
+    physics_enabled = any([lambda_div > 0, lambda_flow > 0, lambda_smooth > 0, lambda_laplacian > 0])
     velocity_loss_enabled = lambda_velocity > 0
     if physics_enabled:
         print("\n=== Physics-Informed Training Enabled ===")
         print(f"  lambda_div (mass conservation): {lambda_div}")
         print(f"  lambda_flow (flow-rate consistency): {lambda_flow}")
-        print(f"  lambda_bc (no-slip BC): {lambda_bc}")
-        print(f"  lambda_smooth (smoothness): {lambda_smooth}")
+        print(f"  lambda_smooth (gradient smoothness): {lambda_smooth}")
+        print(f"  lambda_laplacian (Laplacian smoothness): {lambda_laplacian}")
         print(f"  physics_loss_freq: every {physics_loss_freq} batches")
         print("==========================================\n")
     
@@ -132,8 +132,8 @@ def train(
             device=device,
             lambda_div=lambda_div,
             lambda_flow=lambda_flow,
-            lambda_bc=lambda_bc,
             lambda_smooth=lambda_smooth,
+            lambda_laplacian=lambda_laplacian,
             physics_loss_freq=physics_loss_freq,
             lambda_velocity=lambda_velocity,
             weight_u=weight_u,

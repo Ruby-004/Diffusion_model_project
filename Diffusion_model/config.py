@@ -134,16 +134,16 @@ group_train.add_argument(
     help='Weight for flow-rate consistency loss (constant flux constraint). Recommended: 0.001'
 )
 group_train.add_argument(
-    '--lambda-bc',
-    type=float,
-    default=0.0,
-    help='Weight for no-slip boundary condition loss. Recommended: 0.1'
-)
-group_train.add_argument(
     '--lambda-smooth',
     type=float,
     default=0.0,
-    help='Weight for smoothness regularization. Recommended: 0.0001'
+    help='Weight for gradient smoothness regularization. Recommended: 0.001'
+)
+group_train.add_argument(
+    '--lambda-laplacian',
+    type=float,
+    default=0.0,
+    help='Weight for Laplacian smoothness loss (reduces high-freq noise). Recommended: 0.0001'
 )
 group_train.add_argument(
     '--physics-loss-freq',
@@ -365,8 +365,8 @@ def process_args(args: argparse.Namespace):
             'cost_function': args.cost_function,
             'lambda_div': args.lambda_div,
             'lambda_flow': args.lambda_flow,
-            'lambda_bc': args.lambda_bc,
             'lambda_smooth': args.lambda_smooth,
+            'lambda_laplacian': args.lambda_laplacian,
             'physics_loss_freq': args.physics_loss_freq,
             'predictor_type': args.predictor_type,
             'predictor': {

@@ -162,8 +162,8 @@ def run_epoch(
     device: str = 'cuda',
     lambda_div: float = 0.0,
     lambda_flow: float = 0.0,
-    lambda_bc: float = 0.0,
     lambda_smooth: float = 0.0,
+    lambda_laplacian: float = 0.0,
     physics_loss_freq: int = 1,
     lambda_velocity: float = 0.0,
     weight_u: float = 1.0,
@@ -181,8 +181,8 @@ def run_epoch(
         device: device on which to train ML model.
         lambda_div: Weight for divergence (mass conservation) loss.
         lambda_flow: Weight for flow-rate consistency loss.
-        lambda_bc: Weight for no-slip boundary condition loss.
-        lambda_smooth: Weight for smoothness regularization.
+        lambda_smooth: Weight for gradient smoothness regularization.
+        lambda_laplacian: Weight for Laplacian smoothness (reduces high-freq noise).
         physics_loss_freq: Compute physics loss every N batches.
         lambda_velocity: Weight for auxiliary velocity reconstruction loss.
         weight_u: Weight for u (vx) component in velocity loss.
@@ -208,8 +208,8 @@ def run_epoch(
     physics_loss_calc = PhysicsLoss(
         lambda_div=lambda_div,
         lambda_flow=lambda_flow,
-        lambda_bc=lambda_bc,
-        lambda_smooth=lambda_smooth
+        lambda_smooth=lambda_smooth,
+        lambda_laplacian=lambda_laplacian
     )
     use_physics_loss = physics_loss_calc.is_active()
     use_velocity_loss = lambda_velocity > 0
@@ -225,8 +225,8 @@ def run_epoch(
     physics_loss_components = {
         'divergence': 0.0,
         'flow_rate': 0.0,
-        'no_slip': 0.0,
-        'smoothness': 0.0
+        'smoothness': 0.0,
+        'laplacian': 0.0
     }
     
     # Track per-component velocity metrics

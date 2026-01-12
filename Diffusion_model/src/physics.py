@@ -4,8 +4,10 @@ Physics-informed losses and metrics for latent diffusion model training.
 This module provides differentiable physics constraints for fluid flow prediction:
 - Mass conservation (divergence penalty)
 - Flow-rate consistency (constant flux constraint)
-- Boundary condition enforcement (no-slip at solid walls)
-- Smoothness regularization
+- Smoothness regularization (gradient-based and Laplacian-based)
+
+Note: No-slip boundary condition is NOT included since the masking in the model
+already ensures zero velocity in solid regions.
 
 All losses operate on decoded velocity fields and are differentiable through the VAE decoder.
 
@@ -18,8 +20,8 @@ Tuning Recipe for Lambda Weights:
 5. Recommended starting values:
    - lambda_div: 0.01 (divergence/mass conservation)
    - lambda_flow: 0.001 (flow-rate consistency)
-   - lambda_bc: 0.1 (no-slip boundary condition)
-   - lambda_smooth: 0.0001 (smoothness regularization)
+   - lambda_smooth: 0.001 (gradient smoothness regularization)
+   - lambda_laplacian: 0.0001 (Laplacian smoothness - reduces high-freq noise)
 
 Note: If reconstruction loss increases by more than 10-20%, reduce lambdas.
 """
@@ -32,8 +34,8 @@ __all__ = [
     'PhysicsLoss',
     'divergence_loss_masked',
     'flow_rate_consistency_loss',
-    'no_slip_loss',
     'smoothness_loss',
+    'laplacian_smoothness_loss',
     'compute_physics_metrics',
     'component_weighted_velocity_loss',
     'compute_per_component_metrics'
@@ -52,22 +54,22 @@ class PhysicsLoss:
         self,
         lambda_div: float = 0.0,
         lambda_flow: float = 0.0,
-        lambda_bc: float = 0.0,
         lambda_smooth: float = 0.0,
+        lambda_laplacian: float = 0.0,
         eps: float = 1e-8
     ):
         """
         Args:
             lambda_div: Weight for divergence (mass conservation) loss
             lambda_flow: Weight for flow-rate consistency loss
-            lambda_bc: Weight for no-slip boundary condition loss
-            lambda_smooth: Weight for smoothness regularization
+            lambda_smooth: Weight for gradient smoothness regularization
+            lambda_laplacian: Weight for Laplacian smoothness (reduces high-freq noise)
             eps: Small constant for numerical stability
         """
         self.lambda_div = lambda_div
         self.lambda_flow = lambda_flow
-        self.lambda_bc = lambda_bc
         self.lambda_smooth = lambda_smooth
+        self.lambda_laplacian = lambda_laplacian
         self.eps = eps
     
     def __call__(
@@ -107,17 +109,17 @@ class PhysicsLoss:
             total_loss = total_loss + self.lambda_flow * loss_flow
             components['flow_rate'] = loss_flow.detach()
         
-        # 3. No-slip boundary condition loss
-        if self.lambda_bc > 0:
-            loss_bc = no_slip_loss(vel_5d, mask_5d, eps=self.eps)
-            total_loss = total_loss + self.lambda_bc * loss_bc
-            components['no_slip'] = loss_bc.detach()
-        
-        # 4. Smoothness regularization
+        # 3. Gradient smoothness regularization
         if self.lambda_smooth > 0:
             loss_smooth = smoothness_loss(vel_5d, mask_5d, eps=self.eps)
             total_loss = total_loss + self.lambda_smooth * loss_smooth
             components['smoothness'] = loss_smooth.detach()
+        
+        # 4. Laplacian smoothness (better for reducing high-frequency noise)
+        if self.lambda_laplacian > 0:
+            loss_laplacian = laplacian_smoothness_loss(vel_5d, mask_5d, eps=self.eps)
+            total_loss = total_loss + self.lambda_laplacian * loss_laplacian
+            components['laplacian'] = loss_laplacian.detach()
         
         if return_components:
             return total_loss, components
@@ -126,7 +128,7 @@ class PhysicsLoss:
     def is_active(self) -> bool:
         """Check if any physics constraint is enabled."""
         return (self.lambda_div > 0 or self.lambda_flow > 0 or 
-                self.lambda_bc > 0 or self.lambda_smooth > 0)
+                self.lambda_smooth > 0 or self.lambda_laplacian > 0)
 
 
 def divergence_loss_masked(
@@ -195,7 +197,8 @@ def flow_rate_consistency_loss(
     For steady-state incompressible flow, the volumetric flow rate Q should be
     constant at all cross-sections: Q(x) = ∫∫ u dA = const
     
-    We compute Q at each x-position and penalize deviation from inlet flow rate.
+    We compute Q at each x-position and penalize the variance (deviation from mean).
+    This is more robust than comparing to inlet only, as the mean is more stable.
     
     Args:
         velocity: (batch, 3, D, H, W) tensor with (u, v, w) velocity components
@@ -225,19 +228,19 @@ def flow_rate_consistency_loss(
     # Normalize by fluid area to get mean velocity (more robust)
     Q_normalized = Q / fluid_area
     
-    # Flow rate at inlet (first column)
-    Q_inlet = Q_normalized[:, :, 0:1]  # (B, 1, 1)
+    # Use mean flow rate as target (more stable than inlet-only)
+    Q_mean = Q_normalized.mean(dim=-1, keepdim=True)  # (B, 1, 1)
     
-    # Better numerical stability: only penalize if inlet flow is non-zero
-    Q_inlet_abs = Q_inlet.abs()
-    # Relative flow rate deviation with improved stability
-    relative_deviation = (Q_normalized - Q_inlet) / (Q_inlet_abs + eps)
+    # Compute variance of flow rate across x-positions
+    # This directly penalizes non-constant flow rate
+    Q_variance = ((Q_normalized - Q_mean) ** 2).mean(dim=-1)  # (B, 1)
     
-    # Clip extreme values to prevent gradient explosion
-    relative_deviation = torch.clamp(relative_deviation, -10.0, 10.0)
+    # Normalize by mean squared to get relative variance (coefficient of variation squared)
+    Q_mean_sq = Q_mean.squeeze(-1) ** 2 + eps  # (B, 1)
+    relative_variance = Q_variance / Q_mean_sq
     
-    # Loss: mean squared relative deviation
-    loss = (relative_deviation ** 2).mean()
+    # Mean across batch
+    loss = relative_variance.mean()
     
     return loss
 
@@ -324,6 +327,79 @@ def smoothness_loss(
         count += mask_x.sum() + mask_y.sum() + mask_z.sum()
     
     loss = total_grad_sq / (count + eps)
+    
+    return loss
+
+
+def laplacian_smoothness_loss(
+    velocity: torch.Tensor,
+    mask: torch.Tensor,
+    eps: float = 1e-8
+) -> torch.Tensor:
+    """
+    Penalize Laplacian magnitude in velocity field for smoother flow.
+    
+    L_laplacian = mean(|∇²u|^2) in fluid region
+    
+    The Laplacian (∇²u = ∂²u/∂x² + ∂²u/∂y² + ∂²u/∂z²) measures the local curvature
+    of the velocity field. Minimizing this produces smoother, more diffused fields
+    while preserving large-scale flow patterns better than gradient-based smoothness.
+    
+    This is particularly effective for reducing high-frequency noise/oscillations
+    in the predicted velocity field.
+    
+    Args:
+        velocity: (batch, 3, D, H, W) tensor with velocity components
+        mask: (batch, 1, D, H, W) binary mask, 1=fluid, 0=solid
+        eps: Small constant for numerical stability
+        
+    Returns:
+        Scalar Laplacian smoothness loss
+    """
+    assert velocity.dim() == 5, f"Expected 5D tensor (B,3,D,H,W), got {velocity.dim()}D"
+    
+    total_laplacian_sq = torch.tensor(0.0, device=velocity.device)
+    count = 0
+    
+    for c in range(3):  # For each velocity component
+        vel_c = velocity[:, c:c+1, :, :, :]
+        
+        # Compute second derivatives using central differences
+        # d²u/dx² = u[i+1] - 2*u[i] + u[i-1]
+        
+        # Along width (x direction)
+        d2_dx2 = vel_c[:, :, :, :, 2:] - 2 * vel_c[:, :, :, :, 1:-1] + vel_c[:, :, :, :, :-2]
+        
+        # Along height (y direction)  
+        d2_dy2 = vel_c[:, :, :, 2:, :] - 2 * vel_c[:, :, :, 1:-1, :] + vel_c[:, :, :, :-2, :]
+        
+        # Along depth (z direction)
+        d2_dz2 = vel_c[:, :, 2:, :, :] - 2 * vel_c[:, :, 1:-1, :, :] + vel_c[:, :, :-2, :, :]
+        
+        # Crop to interior region (need 1 pixel border for second derivative)
+        d2_dx2 = d2_dx2[:, :, 1:-1, 1:-1, :]   # (B, 1, D-2, H-2, W-2)
+        d2_dy2 = d2_dy2[:, :, 1:-1, :, 1:-1]
+        d2_dz2 = d2_dz2[:, :, :, 1:-1, 1:-1]
+        
+        # Laplacian = sum of second derivatives
+        laplacian = d2_dx2 + d2_dy2 + d2_dz2
+        
+        # Mask for interior fluid region (all three points in each direction must be fluid)
+        mask_interior = mask[:, :, 1:-1, 1:-1, 1:-1]
+        
+        # Also check neighbors for valid Laplacian computation
+        mask_valid = (
+            mask[:, :, 1:-1, 1:-1, :-2] * mask[:, :, 1:-1, 1:-1, 1:-1] * mask[:, :, 1:-1, 1:-1, 2:] *  # x neighbors
+            mask[:, :, 1:-1, :-2, 1:-1] * mask[:, :, 1:-1, 2:, 1:-1] *  # y neighbors  
+            mask[:, :, :-2, 1:-1, 1:-1] * mask[:, :, 2:, 1:-1, 1:-1]    # z neighbors
+        )
+        
+        # Sum squared Laplacian in valid fluid region
+        laplacian_masked = laplacian * mask_valid
+        total_laplacian_sq = total_laplacian_sq + (laplacian_masked ** 2).sum()
+        count += mask_valid.sum()
+    
+    loss = total_laplacian_sq / (count + eps)
     
     return loss
 

@@ -144,7 +144,7 @@ def main():
     if 'params' in data and 'training' in data['params']:
         train_params = data['params']['training']
         print("\n=== Physics Loss Weights ===")
-        for key in ['lambda_div', 'lambda_flow', 'lambda_bc', 'lambda_smooth']:
+        for key in ['lambda_div', 'lambda_flow', 'lambda_smooth', 'lambda_laplacian']:
             if key in train_params:
                 print(f"  {key}: {train_params[key]}")
 
