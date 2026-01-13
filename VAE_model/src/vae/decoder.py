@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
-from .blocks import ResidualBlock, AttentionBlock
+from .blocks import ResidualBlock, ConditionalResidualBlock, FiLM, AttentionBlock
 from ..common import get_padding
 
 
@@ -23,61 +24,55 @@ class Decoder(nn.Module):
         self.conditional = conditional
         padding = get_padding(self.kernel_size)
         
-        # Condition embedding: maps is_3d (0 or 1) to a per-channel bias
-        # This allows the decoder to specialize output for 2D vs 3D flow
-        if self.conditional:
-            # Embed condition into same number of channels as first conv output
-            self.cond_embed = nn.Sequential(
-                nn.Linear(1, 64),
-                nn.SiLU(),
-                nn.Linear(64, 512)  # Output matches first conv layer's output channels
-            )
-
-
         # Use asymmetric upsampling to match encoder - preserve depth dimension
         # Only upsample in H and W, NOT in depth D
-        # This allows the diffusion model to work accurately in latent space
-        self.layers = nn.Sequential(
-            # nn.Conv3d(self.in_channels, self.in_channels, kernel_size=1, padding=0),
-
-            nn.Conv3d(self.in_channels, 512, kernel_size=self.kernel_size, padding=padding),
-
-            # AttentionBlock removed - with preserved depth (11×64×64 = 45k positions),
-            # the attention matrix would need 15+ GB memory
-            # ResidualBlocks are sufficient for VAE reconstruction
-
-            ResidualBlock(in_channels=512, out_channels=512),
-
-            ResidualBlock(in_channels=512, out_channels=512),
-
-            # (B, C, D, H, W) -> (B, C, D, 2*H, 2*W) - preserve depth!
-            nn.Upsample(scale_factor=(1, 2, 2)),
-
-            nn.Conv3d(512, 256, kernel_size=self.kernel_size, padding=padding),
-
-            ResidualBlock(in_channels=256, out_channels=256),
-
-            ResidualBlock(in_channels=256, out_channels=256),
-
-
-            # (B, C, D, 2*H, 2*W) -> (B, C, D, 4*H, 4*W) - preserve depth!
-            nn.Upsample(scale_factor=(1, 2, 2)),
-
-            nn.Conv3d(256, 128, kernel_size=self.kernel_size, padding=padding),
-
-            ResidualBlock(in_channels=128, out_channels=128),
-
-            ResidualBlock(in_channels=128, out_channels=128),
-
-
-            # ResidualBlock(in_channels=128, out_channels=128),
-
-            nn.GroupNorm(num_groups=32, num_channels=128),
-
-            nn.SiLU(),
-
-            nn.Conv3d(128, self.out_channels, kernel_size=self.kernel_size, padding=padding),
-        )
+        
+        # Initial conv from latent
+        self.conv_in = nn.Conv3d(self.in_channels, 512, kernel_size=self.kernel_size, padding=padding)
+        
+        # FiLM conditioning after initial conv (when conditional=True)
+        if self.conditional:
+            self.film_in = FiLM(condition_dim=1, feature_channels=512)
+        
+        # Stage 1: 512 channels
+        if self.conditional:
+            self.res1_1 = ConditionalResidualBlock(512, 512, conditional=True, condition_dim=1)
+            self.res1_2 = ConditionalResidualBlock(512, 512, conditional=True, condition_dim=1)
+        else:
+            self.res1_1 = ResidualBlock(512, 512)
+            self.res1_2 = ResidualBlock(512, 512)
+        
+        # Upsample 1: 2*H, 2*W
+        self.up1 = nn.Upsample(scale_factor=(1, 2, 2))
+        self.conv_up1 = nn.Conv3d(512, 256, kernel_size=self.kernel_size, padding=padding)
+        
+        # Stage 2: 256 channels
+        if self.conditional:
+            self.res2_1 = ConditionalResidualBlock(256, 256, conditional=True, condition_dim=1)
+            self.res2_2 = ConditionalResidualBlock(256, 256, conditional=True, condition_dim=1)
+        else:
+            self.res2_1 = ResidualBlock(256, 256)
+            self.res2_2 = ResidualBlock(256, 256)
+        
+        # Upsample 2: 4*H, 4*W
+        self.up2 = nn.Upsample(scale_factor=(1, 2, 2))
+        self.conv_up2 = nn.Conv3d(256, 128, kernel_size=self.kernel_size, padding=padding)
+        
+        # Stage 3: 128 channels
+        if self.conditional:
+            self.res3_1 = ConditionalResidualBlock(128, 128, conditional=True, condition_dim=1)
+            self.res3_2 = ConditionalResidualBlock(128, 128, conditional=True, condition_dim=1)
+        else:
+            self.res3_1 = ResidualBlock(128, 128)
+            self.res3_2 = ResidualBlock(128, 128)
+        
+        # Final layers
+        self.norm_out = nn.GroupNorm(num_groups=32, num_channels=128)
+        self.conv_out = nn.Conv3d(128, self.out_channels, kernel_size=self.kernel_size, padding=padding)
+        
+        # Final FiLM before output (can help generate condition-specific outputs)
+        if self.conditional:
+            self.film_pre_out = FiLM(condition_dim=1, feature_channels=128)
 
         print(f'Trainable parameters: {self.trainable_params}.')
 
@@ -87,25 +82,59 @@ class Decoder(nn.Module):
         condition: torch.Tensor = None  # (B,) boolean tensor: True=3D flow, False=2D flow
     ):
         """
-        Forward pass through decoder.
+        Forward pass through decoder with FiLM conditioning at multiple layers.
         
         Args:
             x: Latent representation (B, latent_channels, D, H/4, W/4)
             condition: Optional boolean tensor (B,) where True=3D flow (U), False=2D flow (U_2d)
                        Only used if self.conditional=True
         """
-        first_layer = True
-        for module in self.layers:
-            x = module(x)
-            
-            # Inject condition after first conv layer
-            if first_layer and self.conditional and condition is not None:
-                first_layer = False
-                # condition: (B,) -> (B, 1) -> embed -> (B, 512) -> (B, 512, 1, 1, 1)
-                cond_float = condition.float().unsqueeze(-1)  # (B, 1)
-                cond_bias = self.cond_embed(cond_float)  # (B, 512)
-                cond_bias = cond_bias.view(x.shape[0], -1, 1, 1, 1)  # (B, 512, 1, 1, 1)
-                x = x + cond_bias  # Broadcast across D, H, W
+        # Initial conv
+        x = self.conv_in(x)
+        if self.conditional and condition is not None:
+            x = self.film_in(x, condition)
+        
+        # Stage 1
+        if self.conditional and condition is not None:
+            x = self.res1_1(x, condition)
+            x = self.res1_2(x, condition)
+        else:
+            x = self.res1_1(x)
+            x = self.res1_2(x)
+        
+        # Upsample 1
+        x = self.up1(x)
+        x = self.conv_up1(x)
+        
+        # Stage 2
+        if self.conditional and condition is not None:
+            x = self.res2_1(x, condition)
+            x = self.res2_2(x, condition)
+        else:
+            x = self.res2_1(x)
+            x = self.res2_2(x)
+        
+        # Upsample 2
+        x = self.up2(x)
+        x = self.conv_up2(x)
+        
+        # Stage 3
+        if self.conditional and condition is not None:
+            x = self.res3_1(x, condition)
+            x = self.res3_2(x, condition)
+        else:
+            x = self.res3_1(x)
+            x = self.res3_2(x)
+        
+        # Final layers
+        x = self.norm_out(x)
+        x = F.silu(x)
+        
+        # Apply FiLM before final conv for condition-specific output
+        if self.conditional and condition is not None:
+            x = self.film_pre_out(x, condition)
+        
+        x = self.conv_out(x)
 
         return x
 

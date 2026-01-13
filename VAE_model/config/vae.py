@@ -83,3 +83,12 @@ parser.add_argument(
          'to create separate latent representations for 2D flow (U_2d, w=0) vs 3D flow (U, w≠0). '
          'This helps the model learn to distinguish w=0 inputs from w≠0 outputs.'
 )
+
+parser.add_argument(
+    '--vz-weight',
+    type=float,
+    default=1.0,
+    help='Weight multiplier for V_z (w-component) in the loss function. '
+         'Set > 1.0 to emphasize learning the z-component which is typically smaller. '
+         'Recommended: 3.0-5.0 based on the ratio of V_x to V_z magnitudes.'
+)

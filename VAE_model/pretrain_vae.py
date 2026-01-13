@@ -186,7 +186,18 @@ def main():
         'per_component_norm': use_per_component,
         'norm_factors': norm_factors.tolist(),  # [max_u, max_v, max_w] for decoding
         'conditional': use_conditional,  # Whether VAE uses conditioning
+        'vz_weight': args.vz_weight,  # Weight for V_z component in loss
     }
+    
+    # Channel weights for loss: [vx_weight, vy_weight, vz_weight]
+    # Higher weight on V_z helps the model learn the sparse z-component better
+    channel_weights = torch.tensor([1.0, 1.0, args.vz_weight], dtype=torch.float32, device=args.device)
+    if args.vz_weight != 1.0:
+        print(f"\n=== Channel Weighting ===")
+        print(f"  V_x weight: 1.0")
+        print(f"  V_y weight: 1.0")
+        print(f"  V_z weight: {args.vz_weight}")
+        print(f"=========================\n")
     
     for epoch in range(args.num_epochs):
         
@@ -237,7 +248,8 @@ def main():
 
             # Per-channel loss: computes MAE separately for u, v, w then averages
             # This prevents larger u/v components from dominating, ensuring w-component is learned
-            reconstruction_loss = mae_loss_per_channel(preds, targets, mask=mask)
+            # Channel weights give higher priority to V_z which has smaller magnitude
+            reconstruction_loss = mae_loss_per_channel(preds, targets, mask=mask, weight_per_channel=channel_weights)
             kl_loss = kl_divergence(mu=mean, logvar=logvar)
             loss = (reconstruction_loss + kl_coeff * kl_loss) / gradient_accumulation_steps
             
@@ -312,7 +324,7 @@ def main():
                 targets = targets * mask
                 
                 # Per-channel loss: computes MAE separately for u, v, w then averages
-                reconstruction_loss = mae_loss_per_channel(preds, targets, mask=mask)
+                reconstruction_loss = mae_loss_per_channel(preds, targets, mask=mask, weight_per_channel=channel_weights)
                 kl_loss = kl_divergence(mu=mean, logvar=logvar)
                 loss = reconstruction_loss + kl_coeff * kl_loss
                 
@@ -374,7 +386,7 @@ def main():
             targets = targets * mask
             
             # Per-channel loss: computes MAE separately for u, v, w then averages
-            reconstruction_loss = mae_loss_per_channel(preds, targets, mask=mask)
+            reconstruction_loss = mae_loss_per_channel(preds, targets, mask=mask, weight_per_channel=channel_weights)
             kl_loss = kl_divergence(mu=mean, logvar=logvar)
             
             num_2d = is_2d.sum().item()
