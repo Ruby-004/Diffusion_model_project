@@ -211,7 +211,7 @@ group_train.add_argument(
     '--features',
     type=int,
     nargs='+',
-    default=[64, 128, 256, 512, 1024],
+    default=[128, 256, 512, 1024, 2048],
     help='Number of channels at each (depth) level in the U-Net architecture.'
 )
 group_train.add_argument(

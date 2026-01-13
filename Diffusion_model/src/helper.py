@@ -338,7 +338,7 @@ def run_epoch(
             velocity_pred_for_physics = None
             
             # For physics loss or auxiliary velocity loss, reconstruct velocity if not already done
-            if (use_physics_loss or (use_velocity_loss and not velocity_loss_primary)) and (i % physics_loss_freq == 0):
+            if (use_physics_loss or (use_velocity_loss and not velocity_loss_primary)) and (physics_loss_freq > 0) and (i % physics_loss_freq == 0):
                 try:
                     # Reconstruct velocity if not already done for primary loss
                     if velocity_loss_primary:
@@ -405,6 +405,18 @@ def run_epoch(
         if use_physics_loss:
             running_physics_loss += physics_loss.item() if isinstance(physics_loss, torch.Tensor) else physics_loss
 
+        # Explicitly clean up heavy memory after physics loss buffer
+        if (use_physics_loss or (use_velocity_loss and not velocity_loss_primary)) and (physics_loss_freq > 0) and (i % physics_loss_freq == 0):
+            # Delete large tensors holding computational graphs
+            del velocity_pred_for_physics
+            del physics_loss
+            del velocity_loss
+            del total_loss
+            
+            # Force empty cache to release VAE decoder memory
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
     avg_train_loss = running_loss / (i+1)
     avg_physics_loss = running_physics_loss / (i+1) if use_physics_loss else 0.0
     
@@ -448,52 +460,53 @@ def run_epoch(
                 loss = criterion(output=preds, target=target_noise)
                 
                 # Compute physics metrics on validation set
-                try:
-                    # Use full prediction for metrics (not just noise pred)
-                    batch_size = img.shape[0]
-                    num_slices = img.shape[1]
-                    latent_depth = target_latents.shape[1]
-                    latent_channels = target_latents.shape[2]
-                    latent_h = target_latents.shape[3]
-                    latent_w = target_latents.shape[4]
-                    
-                    # Get timesteps for reconstruction
-                    t = torch.randint(0, predictor.num_timesteps, (batch_size * latent_depth,), device=device).long()
-                    target_latents_flat = target_latents.reshape(
-                        batch_size * latent_depth, latent_channels, latent_h, latent_w
-                    )
-                    noise_flat = noise.reshape(
-                        batch_size * latent_depth, latent_channels, latent_h, latent_w
-                    )
-                    x_t = predictor.scheduler.q_sample(target_latents_flat, t, noise_flat)
-                    
-                    velocity_pred = reconstruct_velocity_from_noise_pred(
-                        noise_pred=preds,
-                        x_t=x_t,
-                        t=t,
-                        scheduler=predictor.scheduler,
-                        vae_decoder=predictor.vae.decode,
-                        normalizer_output=predictor.normalizer['output'],
-                        batch_size=batch_size,
-                        latent_depth=latent_depth,
-                        latent_channels=latent_channels,
-                        latent_h=latent_h,
-                        latent_w=latent_w,
-                        num_slices=num_slices,
-                        img=img
-                    )
-                    
-                    # Compute physics metrics (verbose on first batch only)
-                    batch_metrics = compute_physics_metrics(velocity_pred, img, verbose=(j == 0))
-                    for key in accumulated_physics_metrics:
-                        if key in batch_metrics:
-                            accumulated_physics_metrics[key] += batch_metrics[key]
-                    val_physics_count += 1
-                    
-                except Exception as e:
-                    print(f"Warning: Physics metrics computation failed: {e}")
-                    import traceback
-                    traceback.print_exc()
+                if use_physics_loss or use_velocity_loss:
+                    try:
+                        # Use full prediction for metrics (not just noise pred)
+                        batch_size = img.shape[0]
+                        num_slices = img.shape[1]
+                        latent_depth = target_latents.shape[1]
+                        latent_channels = target_latents.shape[2]
+                        latent_h = target_latents.shape[3]
+                        latent_w = target_latents.shape[4]
+                        
+                        # Get timesteps for reconstruction
+                        t = torch.randint(0, predictor.num_timesteps, (batch_size * latent_depth,), device=device).long()
+                        target_latents_flat = target_latents.reshape(
+                            batch_size * latent_depth, latent_channels, latent_h, latent_w
+                        )
+                        noise_flat = noise.reshape(
+                            batch_size * latent_depth, latent_channels, latent_h, latent_w
+                        )
+                        x_t = predictor.scheduler.q_sample(target_latents_flat, t, noise_flat)
+                        
+                        velocity_pred = reconstruct_velocity_from_noise_pred(
+                            noise_pred=preds,
+                            x_t=x_t,
+                            t=t,
+                            scheduler=predictor.scheduler,
+                            vae_decoder=predictor.vae.decode,
+                            normalizer_output=predictor.normalizer['output'],
+                            batch_size=batch_size,
+                            latent_depth=latent_depth,
+                            latent_channels=latent_channels,
+                            latent_h=latent_h,
+                            latent_w=latent_w,
+                            num_slices=num_slices,
+                            img=img
+                        )
+                        
+                        # Compute physics metrics (verbose on first batch only)
+                        batch_metrics = compute_physics_metrics(velocity_pred, img, verbose=(j == 0))
+                        for key in accumulated_physics_metrics:
+                            if key in batch_metrics:
+                                accumulated_physics_metrics[key] += batch_metrics[key]
+                        val_physics_count += 1
+                        
+                    except Exception as e:
+                        print(f"Warning: Physics metrics computation failed: {e}")
+                        import traceback
+                        traceback.print_exc()
 
             else:
                 raise ValueError(f"Unknown option: {option}")
