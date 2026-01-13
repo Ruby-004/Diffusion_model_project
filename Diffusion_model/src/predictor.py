@@ -91,14 +91,31 @@ class Predictor(ABC, nn.Module):
 
         return self.normalizer
 
-    def load_weights(self, model_path: str, device: str):
-        """Load model parameters from `.pt` file."""
-        self.load_state_dict(
-            torch.load(
-                model_path,
-                map_location=torch.device(device)
-            )
-        )
+    def load_weights(self, model_path: str, device: str, strict: bool = True):
+        """
+        Load model parameters from `.pt` file.
+        
+        Args:
+            model_path: Path to the model weights file.
+            device: Device to load the model on.
+            strict: If True, requires exact key match. If False, allows missing/unexpected keys.
+        """
+        state_dict = torch.load(model_path, map_location=torch.device(device))
+        
+        # Handle scheduler key mismatch (old models used simple attributes, new uses register_buffer)
+        model_keys = set(self.state_dict().keys())
+        loaded_keys = set(state_dict.keys())
+        
+        scheduler_keys_loaded = {k for k in loaded_keys if k.startswith('scheduler.')}
+        scheduler_keys_model = {k for k in model_keys if k.startswith('scheduler.')}
+        
+        if scheduler_keys_loaded != scheduler_keys_model:
+            print(f"Note: Scheduler format mismatch detected. Reinitializing scheduler.")
+            # Remove scheduler keys from loaded state dict
+            state_dict = {k: v for k, v in state_dict.items() if not k.startswith('scheduler.')}
+            strict = False
+        
+        self.load_state_dict(state_dict, strict=strict)
         print(f'Loaded weights from "{model_path}".')
 
     @classmethod
@@ -231,7 +248,7 @@ class LatentDiffusionPredictor(Predictor):
         # Load VAE config to get norm_factors
         vae_log_path = osp.join(vae_path, 'vae_log.json')
         vae_norm_factors = None
-        vae_conditional = False  # Whether VAE uses conditioning
+        vae_conditional = None  # Whether VAE uses conditioning
         if osp.exists(vae_log_path):
             with open(vae_log_path, 'r') as f:
                 vae_log = json.load(f)
@@ -241,6 +258,11 @@ class LatentDiffusionPredictor(Predictor):
             if 'conditional' in vae_log:
                 vae_conditional = vae_log['conditional']
                 print(f"Loaded VAE conditional mode: {vae_conditional}")
+        
+        # Use default if not found in log (non-conditional is simpler default)
+        if vae_conditional is None:
+            vae_conditional = False
+            print(f"WARNING: VAE conditional mode not found in log. Defaulting to False (non-conditional).")
         
         # Store conditional flag for use in encode/decode
         self.vae_conditional = vae_conditional
@@ -469,8 +491,8 @@ class LatentDiffusionPredictor(Predictor):
              with torch.no_grad():
                   noise_pred = self.model(unet_input, t_batch)
              
-             # Step
-             x = self.scheduler.p_sample(noise_pred, x, t)
+             # Step - use wider clip range for latent space
+             x = self.scheduler.p_sample(noise_pred, x, t, clip_denoised=True, clip_range=(-30.0, 30.0))
         
         predicted_latent_flat = x
         
@@ -509,6 +531,109 @@ class LatentDiffusionPredictor(Predictor):
              # Let it broadcast
              pass
         
+        velocity_3d = velocity_3d * img
+        
+        return velocity_3d
+    
+    def predict_ddim(self, img: torch.Tensor, velocity_2d: torch.Tensor, num_steps: int = 50, eta: float = 0.0, noise: torch.Tensor = None):
+        """
+        Predict 3D velocity field using DDIM sampling (faster than DDPM).
+        
+        Args:
+            img: Microstructure images. Shape: (batch, num_slices, 1, H, W)
+            velocity_2d: 2D velocity input. Shape: (batch, num_slices, 3, H, W) 
+            num_steps: Number of DDIM sampling steps (default 50, can be as low as 20)
+            eta: DDIM stochasticity (0 = deterministic, 1 = DDPM-like)
+            noise: Optional initial noise
+        """
+        batch_size = img.shape[0]
+        device = img.device
+        num_slices = velocity_2d.shape[1]
+        
+        img_flat = img.view(batch_size * num_slices, 1, img.shape[3], img.shape[4])
+        
+        # Get dimensions
+        with torch.no_grad():
+            dummy_5d = torch.zeros(1, 3, num_slices, img.shape[3], img.shape[4]).to(device)
+            dummy_condition = torch.zeros(1, dtype=torch.bool, device=device) if self.vae_conditional else None
+            latent_shape = self.vae.encoder(dummy_5d, condition=dummy_condition)[0].shape
+            latent_channels = latent_shape[1]
+            latent_depth = latent_shape[2]
+            latent_h, latent_w = latent_shape[3], latent_shape[4]
+             
+        # Prepare conditioning
+        velocity_2d_permuted = velocity_2d.permute(0, 2, 1, 3, 4)
+        with torch.no_grad():
+            condition_2d = torch.zeros(batch_size, dtype=torch.bool, device=device) if self.vae_conditional else None
+            velocity_2d_latent_5d, _ = self.vae.encode(velocity_2d_permuted, condition=condition_2d)
+        velocity_2d_latent = velocity_2d_latent_5d.permute(0, 2, 1, 3, 4)
+        
+        feats_flat = self.pre_process(img_flat)
+        feats_downsampled = torch.nn.functional.interpolate(feats_flat, size=(latent_h, latent_w), mode='bilinear', align_corners=False)
+        
+        velocity_2d_latent_flat = velocity_2d_latent.reshape(batch_size * latent_depth, latent_channels, latent_h, latent_w)
+        
+        feats_3d = feats_downsampled.reshape(batch_size, num_slices, 1, latent_h, latent_w)
+        feats_3d_interp = torch.nn.functional.interpolate(
+            feats_3d.permute(0, 2, 1, 3, 4),
+            size=(latent_depth, latent_h, latent_w),
+            mode='trilinear',
+            align_corners=False
+        ).permute(0, 2, 1, 3, 4)
+        feats_latent_flat = feats_3d_interp.reshape(batch_size * latent_depth, 1, latent_h, latent_w)
+        
+        # Create DDIM timestep schedule
+        timesteps = torch.linspace(self.num_timesteps - 1, 0, num_steps, dtype=torch.long, device=device)
+        
+        # Sampling Loop with DDIM
+        if noise is None:
+            noise = torch.randn(batch_size * latent_depth, latent_channels, latent_h, latent_w, device=device)
+        else:
+            noise = noise.reshape(batch_size * latent_depth, latent_channels, latent_h, latent_w)
+            
+        x = noise
+        self.scheduler.to(device)
+        
+        for i in range(len(timesteps)):
+            t = timesteps[i].item()
+            t_prev = timesteps[i + 1].item() if i + 1 < len(timesteps) else -1
+            
+            t_batch = torch.full((batch_size * latent_depth,), t, device=device, dtype=torch.long)
+            
+            unet_input = torch.cat([x, velocity_2d_latent_flat, feats_latent_flat], dim=1)
+            
+            with torch.no_grad():
+                noise_pred = self.model(unet_input, t_batch)
+            
+            # DDIM step
+            x = self.scheduler.ddim_sample(noise_pred, x, t, t_prev, eta=eta, clip_range=(-30.0, 30.0))
+        
+        predicted_latent_flat = x
+        
+        # Decode
+        predicted_latents = predicted_latent_flat.reshape(batch_size, latent_depth, latent_channels, latent_h, latent_w)
+        predicted_latents_5d = predicted_latents.permute(0, 2, 1, 3, 4)
+        
+        with torch.no_grad():
+            condition_3d = torch.ones(batch_size, dtype=torch.bool, device=device) if self.vae_conditional else None
+            velocity_5d = self.vae.decode(predicted_latents_5d, condition=condition_3d)
+        
+        velocity_3d = velocity_5d.permute(0, 2, 1, 3, 4)
+        
+        # Denormalize
+        batch, depth, channels, height, width = velocity_3d.shape
+        velocity_flat = velocity_3d.reshape(batch * depth, channels, height, width)
+        velocity_flat = self.normalizer['output'].inverse(velocity_flat)
+        velocity_3d = velocity_flat.reshape(batch, depth, channels, height, width)
+
+        if depth != num_slices:
+            velocity_3d = torch.nn.functional.interpolate(
+                velocity_3d.permute(0, 2, 1, 3, 4),
+                size=(num_slices, height, width),
+                mode='trilinear',
+                align_corners=False
+            ).permute(0, 2, 1, 3, 4)
+
         velocity_3d = velocity_3d * img
         
         return velocity_3d
