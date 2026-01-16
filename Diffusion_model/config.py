@@ -265,6 +265,18 @@ group_train.add_argument(
     help='Path to pre-trained VAE model (required for latent-diffusion predictor).'
 )
 group_train.add_argument(
+    '--vae-encoder-path',
+    type=str,
+    default=None,
+    help='Path to VAE encoder weights (optional, for dual VAE: use Stage 2 E2D). If not provided, uses --vae-path.'
+)
+group_train.add_argument(
+    '--vae-decoder-path',
+    type=str,
+    default=None,
+    help='Path to VAE decoder weights (optional, for dual VAE: use Stage 1 D3D). If not provided, uses --vae-path.'
+)
+group_train.add_argument(
     '--num-slices',
     type=int,
     default=11,
@@ -395,6 +407,8 @@ def process_args(args: argparse.Namespace):
                 },
                 'distance_transform': args.distance_transform,
                 'vae_path': args.vae_path,
+                'vae_encoder_path': args.vae_encoder_path,
+                'vae_decoder_path': args.vae_decoder_path,
                 'num_slices': args.num_slices
             }
         },

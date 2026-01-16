@@ -24,6 +24,8 @@ def main():
     parser.add_argument('model_path', type=str, help='Path to the trained diffusion model (directory or .pt file)')
     parser.add_argument('sample_path', type=str, nargs='?', default=None, help='Path to the input sample (.pt file). If not provided, uses a sample from the test set.')
     parser.add_argument('--vae-path', type=str, default=None, help='Path to the trained VAE model directory. If not provided, uses VAE path from model config.')
+    parser.add_argument('--vae-encoder-path', type=str, default=None, help='Path to VAE encoder weights (E2D, e.g. Stage 2). Optional.')
+    parser.add_argument('--vae-decoder-path', type=str, default=None, help='Path to VAE decoder weights (D3D/E3D, e.g. Stage 1). Optional.')
     parser.add_argument('--dataset-dir', type=str, default=None, help='Path to the dataset directory (overrides config). Used to locate statistics.json and test samples.')
     parser.add_argument('--index', type=int, default=0, help='Index of the sample in the test set to use (only if sample_path is not provided). Default: 0')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu', help='Device to use')
@@ -42,7 +44,15 @@ def main():
         weights_file = args.model_path
     else:
         model_dir = args.model_path
-        weights_file = os.path.join(model_dir, 'model.pt')
+        # Prefer best_model.pt over model.pt (model.pt may be corrupted or incomplete)
+        best_model_path = os.path.join(model_dir, 'best_model.pt')
+        model_path = os.path.join(model_dir, 'model.pt')
+        if os.path.exists(best_model_path):
+            weights_file = best_model_path
+        elif os.path.exists(model_path):
+            weights_file = model_path
+        else:
+            raise FileNotFoundError(f"No model weights found in {model_dir}. Expected best_model.pt or model.pt")
         
     print(f"Loading model configuration from {model_dir}")
     log_path = os.path.join(model_dir, 'log.json')
@@ -83,28 +93,40 @@ def main():
         print(f"Using statistics from: {norm_file}")
             
     # Fix VAE path in config if it was absolute path from another machine
-    if 'vae_path' in predictor_kwargs:
-        vae_path = predictor_kwargs['vae_path']
-        
-        # Override with command-line argument if provided
-        if args.vae_path:
-            vae_path = args.vae_path
-            print(f"Using VAE path from command-line argument: {vae_path}")
-        
-        if not os.path.exists(vae_path) and not os.path.isabs(vae_path):
-             # Try absolute relative to project
-             vae_path = os.path.join(project_root, vae_path)
-        
-        if not os.path.exists(vae_path) and 'VAE_model' in vae_path:
-             # Heuristic: find VAE_model relative to project root
-             idx = vae_path.find('VAE_model')
-             vae_path = os.path.join(project_root, vae_path[idx:])
-             
+
+    # Handle VAE path logic (vae_path, vae_encoder_path, vae_decoder_path)
+    def resolve_path(path):
+        if not path:
+            return None
+        if os.path.exists(path):
+            return path
+        if not os.path.isabs(path):
+            abs_path = os.path.join(project_root, path)
+            if os.path.exists(abs_path):
+                return abs_path
+        if 'VAE_model' in path:
+            idx = path.find('VAE_model')
+            abs_path = os.path.join(project_root, path[idx:])
+            if os.path.exists(abs_path):
+                return abs_path
+        return path  # fallback
+
+    # Always set vae_path (required)
+    vae_path = args.vae_path or predictor_kwargs.get('vae_path', None)
+    if vae_path:
+        vae_path = resolve_path(vae_path)
         predictor_kwargs['vae_path'] = vae_path
-    elif args.vae_path:
-        # VAE path not in config but provided via command line
-        predictor_kwargs['vae_path'] = args.vae_path
-        print(f"Using VAE path from command-line argument: {args.vae_path}")
+        print(f"Using VAE path: {vae_path}")
+
+    # Optionally set vae_encoder_path and vae_decoder_path
+    if args.vae_encoder_path:
+        vae_encoder_path = resolve_path(args.vae_encoder_path)
+        predictor_kwargs['vae_encoder_path'] = vae_encoder_path
+        print(f"Using VAE encoder path: {vae_encoder_path}")
+    if args.vae_decoder_path:
+        vae_decoder_path = resolve_path(args.vae_decoder_path)
+        predictor_kwargs['vae_decoder_path'] = vae_decoder_path
+        print(f"Using VAE decoder path: {vae_decoder_path}")
 
     print("Initializing models...")
     # This initializes LatentDiffusionPredictor, which loads the VAE (Step 1)
@@ -115,8 +137,27 @@ def main():
     )
     
     # Load Diffusion Model Weights (Step 2)
+    # We use strict=False because:
+    # 1. The checkpoint may have VAE weights from a different architecture (standard vs dual VAE)
+    # 2. We've already loaded the VAE weights separately with proper handling
     print(f"Loading weights from {weights_file}")
-    predictor.load_state_dict(torch.load(weights_file, map_location=device))
+    loaded_state = torch.load(weights_file, map_location=device)
+    
+    # Filter out VAE weights - we've already loaded them
+    model_state = {k: v for k, v in loaded_state.items() if not k.startswith('vae.')}
+    
+    # Load model weights with strict=False to allow missing VAE keys
+    missing, unexpected = predictor.load_state_dict(model_state, strict=False)
+    
+    # Only print warnings for non-VAE keys
+    non_vae_missing = [k for k in missing if not k.startswith('vae.')]
+    non_vae_unexpected = [k for k in unexpected if not k.startswith('vae.')]
+    if non_vae_missing:
+        print(f"Warning: Missing keys (non-VAE): {non_vae_missing}")
+    if non_vae_unexpected:
+        print(f"Warning: Unexpected keys (non-VAE): {non_vae_unexpected}")
+    
+    print(f"Loaded model weights. VAE weights were loaded separately with dual VAE handling.")
     predictor.to(device)
     predictor.eval()
 
