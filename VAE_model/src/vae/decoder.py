@@ -106,6 +106,17 @@ class Decoder(nn.Module):
                 cond_bias = self.cond_embed(cond_float)  # (B, 512)
                 cond_bias = cond_bias.view(x.shape[0], -1, 1, 1, 1)  # (B, 512, 1, 1, 1)
                 x = x + cond_bias  # Broadcast across D, H, W
+        
+        # Explicitly zero out w component (channel 2) for 2D flow
+        # This ensures w=0 when condition=False (is_2d=True)
+        if self.conditional and condition is not None:
+            # condition is True for 3D flow, False for 2D flow
+            # For 2D flow (condition=False), set w channel to zero
+            # x shape: (B, 3, D, H, W) where channels are [u, v, w]
+            mask_2d = ~condition  # True where flow is 2D (w should be 0)
+            if mask_2d.any():
+                # Zero out w channel (index 2) for 2D samples
+                x[mask_2d, 2, :, :, :] = 0.0
 
         return x
 
