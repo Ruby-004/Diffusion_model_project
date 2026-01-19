@@ -1,7 +1,6 @@
 import time
 import json
 import os.path as osp
-from sqlalchemy import create_engine
 
 import torch
 import torch.optim as optim
@@ -297,7 +296,7 @@ def objective(trial: Trial):
         shuffle=args.shuffle,
         augment=args.augment,
         k_folds=None,
-        num_workers=1,
+        num_workers=0,
         use_3d=args.use_3d
     )[0]
 
@@ -318,7 +317,7 @@ if __name__=='__main__':
             shuffle=args.shuffle,
             augment=args.augment,
             k_folds=None,
-            num_workers=1,
+            num_workers=0,
             use_3d=args.use_3d
         )[0]
 
@@ -335,7 +334,7 @@ if __name__=='__main__':
             shuffle=args.shuffle,
             augment=args.augment,
             k_folds=args.k_folds,
-            num_workers=1,
+            num_workers=0,
             use_3d=args.use_3d
         )
 

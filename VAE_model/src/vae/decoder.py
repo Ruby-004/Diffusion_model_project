@@ -89,18 +89,53 @@ class Decoder(nn.Module):
             condition: Optional boolean tensor (B,) where True=3D flow (U), False=2D flow (U_2d)
                        Only used if self.conditional=True
         """
-        first_layer = True
-        for module in self.layers:
-            x = module(x)
-            
-            # Inject condition after first conv layer
-            if first_layer and self.conditional and condition is not None:
-                first_layer = False
-                # condition: (B,) -> (B, 1) -> embed -> (B, 512) -> (B, 512, 1, 1, 1)
-                cond_float = condition.float().unsqueeze(-1)  # (B, 1)
-                cond_bias = self.cond_embed(cond_float)  # (B, 512)
-                cond_bias = cond_bias.view(x.shape[0], -1, 1, 1, 1)  # (B, 512, 1, 1, 1)
-                x = x + cond_bias  # Broadcast across D, H, W
+        # Initial conv
+        x = self.conv_in(x)
+        
+        # Apply FiLM conditioning after initial conv
+        if self.conditional and condition is not None:
+            x = self.film_in(x, condition)
+        
+        # Stage 1: 512 channels
+        if self.conditional and condition is not None:
+            x = self.res1_1(x, condition)
+            x = self.res1_2(x, condition)
+        else:
+            x = self.res1_1(x)
+            x = self.res1_2(x)
+        
+        # Upsample 1
+        x = self.up1(x)
+        x = self.conv_up1(x)
+        
+        # Stage 2: 256 channels
+        if self.conditional and condition is not None:
+            x = self.res2_1(x, condition)
+            x = self.res2_2(x, condition)
+        else:
+            x = self.res2_1(x)
+            x = self.res2_2(x)
+        
+        # Upsample 2
+        x = self.up2(x)
+        x = self.conv_up2(x)
+        
+        # Stage 3: 128 channels
+        if self.conditional and condition is not None:
+            x = self.res3_1(x, condition)
+            x = self.res3_2(x, condition)
+        else:
+            x = self.res3_1(x)
+            x = self.res3_2(x)
+        
+        # Apply FiLM before output
+        if self.conditional and condition is not None:
+            x = self.film_pre_out(x, condition)
+        
+        # Final layers
+        x = self.norm_out(x)
+        x = F.silu(x)
+        x = self.conv_out(x)
         
         # Explicitly zero out w component (channel 2) for 2D flow
         # This ensures w=0 when condition=False (is_2d=True)

@@ -225,7 +225,7 @@ predictor = Predictor.from_directory_or_url(directory_or_url, device)
 ```bash
 cd Diffusion_model
 python scripts/evaluate_diffusion_vae.py \
-  --dataset-dir ../data/rve_5k_xy \
+  --dataset-dir "C:\Users\alexd\Downloads\dataset_3d"
   --vae-path ../VAE_model/trained/vae_new_8 \
   --diffusion-path trained/20260109_unet_latent-diffusion_...
 ```

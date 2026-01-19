@@ -67,7 +67,7 @@ def main():
     os.makedirs(args.save_dir, exist_ok=True)
     
     # KL annealing parameters
-    kl_warmup_epochs = 10  # Gradually increase KL weight over first 10 epochs
+    kl_warmup_epochs = 10  # Gradually increase KL weight over first 20 epochs
     max_kl_coeff = 1e-3  # Maximum KL coefficient
     gradient_accumulation_steps = 10  # Accumulate gradients to simulate larger batch
     
@@ -81,21 +81,24 @@ def main():
     print(f"\nLoading dataset from: {args.dataset_dir}")
     full_dataset = MicroFlowDatasetVAE(root_dir=args.dataset_dir, augment=args.augment)
     
-    # Filter to keep only 3D samples (is_2d=False)
-    print("Filtering for 3D samples only...")
-    indices_3d = []
-    for i in range(len(full_dataset)):
-        sample = full_dataset[i]
-        if not sample['is_2d']:
-            indices_3d.append(i)
+    # # Filter to keep only 3D samples (is_2d=False)
+    # print("Filtering for 3D samples only...")
+    # indices_3d = []
+    # for i in range(len(full_dataset)):
+    #     sample = full_dataset[i]
+    #     if not sample['is_2d']:
+    #         indices_3d.append(i)
     
-    print(f"Total samples: {len(full_dataset)}, 3D samples: {len(indices_3d)}")
+    # print(f"Total samples: {len(full_dataset)}, 3D samples: {len(indices_3d)}")
     
-    # Create subset with only 3D samples
-    dataset_3d = Subset(full_dataset, indices_3d)
+    # # Create subset with only 3D samples
+    # dataset_3d = Subset(full_dataset, indices_3d)
     
     # 70/15/15 split
-    num_samples = len(dataset_3d)
+    # Use ALL samples (both 2D and 3D)
+    print(f"Using all samples: 2D and 3D combined")
+    dataset_3d = full_dataset  # Rename kept for compatibility
+    num_samples = len(full_dataset)
     train_size = int(0.7 * num_samples)
     val_size = int(0.15 * num_samples)
     test_size = num_samples - train_size - val_size
@@ -204,10 +207,26 @@ def main():
             self.decoder_3d = vae.decoder
         
         def forward(self, x, condition=None):
-            mean, logvar = self.encoder_3d(x)
-            z = self.encoder_3d.reparameterize(mean, logvar)
-            recon = self.decoder_3d(z)
+            mean, logvar = self.encoder_3d(x, condition)
+            z = self.encoder_3d.sample(mean, logvar)
+            recon = self.decoder_3d(z, condition)
             return recon, (mean, logvar)
+        
+        def save_model(self, folder, log=None):
+            """Save model checkpoint and training log."""
+            import os
+            os.makedirs(folder, exist_ok=True)
+            
+            # Save state dict
+            model_path = os.path.join(folder, 'vae.pt')
+            torch.save(self.state_dict(), model_path)
+            
+            # Save log if provided
+            if log is not None:
+                log_path = os.path.join(folder, 'vae_log.json')
+                import json
+                with open(log_path, 'w') as f:
+                    json.dump(log, f, indent=2)
     
     vae = VAE3DWrapper(base_vae).to(device)
     

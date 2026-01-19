@@ -6,6 +6,17 @@ from datetime import datetime
 import torch
 
 
+def str_to_bool(value):
+    """Convert string to boolean for argparse."""
+    if isinstance(value, bool):
+        return value
+    if value.lower() in ('true', 't', 'yes', 'y', '1'):
+        return True
+    if value.lower() in ('false', 'f', 'no', 'n', '0'):
+        return False
+    raise argparse.ArgumentTypeError(f"Boolean value expected, got '{value}'")
+
+
 parser = argparse.ArgumentParser()
 
 parser.add_argument(
@@ -58,13 +69,13 @@ group_dataset.add_argument(
 )
 group_dataset.add_argument(
     '--augment',
-    type=bool,
+    type=str_to_bool,
     default=False,
     help='Whether to augment dataset (e.g., by flipping images).'
 )
 group_dataset.add_argument(
     '--shuffle',
-    type=bool,
+    type=str_to_bool,
     default=False,
     help='Whether to shuffle data during training.'
 )
@@ -98,7 +109,7 @@ group_train.add_argument(
 )
 group_train.add_argument(
     '--scheduler-flag',
-    type=bool,
+    type=str_to_bool,
     default=False,
     help='Whether to use learning rate scheduler.'
 )
@@ -177,7 +188,7 @@ group_train.add_argument(
 )
 group_train.add_argument(
     '--velocity-loss-primary',
-    type=bool,
+    type=str_to_bool,
     default=False,
     help='If True, use per-channel velocity loss as PRIMARY loss instead of noise prediction. Slower but directly optimizes velocity channels.'
 )
@@ -254,7 +265,7 @@ group_train.add_argument(
 )
 group_train.add_argument(
     '--distance-transform',
-    type=bool,
+    type=str_to_bool,
     default=True,
     help='Whether to use distance transform for input image.'
 )
@@ -284,7 +295,7 @@ group_train.add_argument(
 )
 group_train.add_argument(
     '--use-3d',
-    type=bool,
+    type=str_to_bool,
     default=False,
     help='Whether to use 3D velocity data from dataset.'
 )
@@ -321,7 +332,7 @@ group_optim.add_argument(
 )
 group_optim.add_argument(
     '--top-bottom',
-    type=bool,
+    type=str_to_bool,
     default=True,
     nargs=2,
     help='If "True", define channel sizes from top-to-bottom. If "False", then proceed from bottom-to-top.'
