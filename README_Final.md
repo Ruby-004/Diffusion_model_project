@@ -22,6 +22,8 @@ This project implements a physics-informed machine learning pipeline for predict
 #### Installation Steps
 
 1. **Clone the repository** (if not already done):
+
+Update: Check if bash is needed
    ```bash
    git clone <repository-url>
    cd Diffusion_model_project
@@ -43,21 +45,14 @@ This project implements a physics-informed machine learning pipeline for predict
    pip install -r requirements.txt
    ```
 
-   Key dependencies include:
-   - `torch`: Deep learning framework
-   - `torchvision`: Vision utilities
-   - `scipy`: Scientific computing
-   - `numpy`: Numerical computing
-   - `pandas`: Data manipulation
-   - `matplotlib`, `seaborn`: Visualization
-   - `tqdm`: Progress bars
-
 4. **Verify installation**:
    ```bash
    python -c "import torch; print(f'PyTorch version: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
    ```
 
 ### 2. Downloading Pre-trained Models
+
+Update
 
 The project uses pre-trained models hosted on Zenodo. Models are automatically downloaded and cached when needed.
 
@@ -75,7 +70,8 @@ python Diffusion_model/train.py --root-dir data/rve_5k_xy \
 
 1. **VAE Model** (required for latent diffusion):
    - Download from [Zenodo Record](https://doi.org/10.5281/zenodo.16940478)
-   - Extract to `VAE_model/trained/vae_new_8/`
+   - Extract stage 1 checkpoint to `VAE_model/trained/dual_vae_stage1/`
+   - Extract stage 2 checkpoint to `VAE_model/trained/dual_vae_stage2/`
 
 2. **Diffusion Model** (for inference only):
    - Available at [Zenodo Record](https://doi.org/10.5281/zenodo.17306446)
@@ -98,9 +94,12 @@ project_root/
 │       └── statistics.json
 ├── VAE_model/
 │   └── trained/
-│       └── vae_new_8/
-│           ├── vae.pt
-│           └── vae_log.json
+│       ├── dual_vae_stage1/
+│       │   └── checkpoint_best.pt  # Stage 1: 3D VAE only
+│       └── dual_vae_stage2/
+│           ├── model.pt            # Stage 2: Complete dual-branch VAE
+│           ├── checkpoint_best.pt
+│           └── log.json
 └── Diffusion_model/
     └── trained/
         └── [timestamp]_unet_latent-diffusion_[params]/
@@ -111,33 +110,60 @@ project_root/
 
 ### 3. Running the Code
 
-#### A. Training a VAE (Prerequisite)
+In this section, all the shell code provided includes the parameters values used to obtain the final model that can be downloaded as described in the pre-trained model section. These can be changed to obtain different models.
 
-If training a new diffusion model, first train or use a pre-trained VAE:
+#### A. Training a VAE (Prerequisite) - Two-Stage Process
 
+Update: I don't think it is needed to actually train a whole VAE but check 
+If training a new diffusion model, you must train a Dual-Branch VAE with a two-stage process.
+
+**Stage 1: Train 3D VAE only**
+Update parameters and add key parameters section
 ```bash
 cd VAE_model
-python pretrain_vae.py \
+python train_3d_vae_only.py \
   --dataset-dir ../data/rve_5k_xy \
+  --save-dir trained/dual_vae_stage1 \
   --in-channels 3 \
-  --latent-channels 4 \
-  --batch-size 10 \
+  --latent-channels 8 \
+  --batch-size 2 \
   --num-epochs 100 \
-  --learning-rate 1e-4
+  --learning-rate 1e-4 \
+  --per-component-norm
 ```
 
-**Output**: Saves trained VAE to `trained/vae_new_8/` with `vae.pt` weights and `vae_log.json` config.
+**Stage 2: Train 2D VAE with alignment and cross-reconstruction**
+Update parameters and add key parameters section
+```bash
+python train_2d_with_cross.py \
+  --dataset-dir ../data/rve_5k_xy \
+  --save-dir trained/dual_vae_stage2 \
+  --stage1-checkpoint trained/dual_vae_stage1/checkpoint_best.pt \
+  --in-channels 3 \
+  --latent-channels 8 \
+  --batch-size 1 \
+  --num-epochs 100 \
+  --learning-rate 5e-5 \
+  --per-component-norm \
+  --lambda-align 5 \
+  --lambda-cross 50
+```
+
+**Output**: 
+- Stage 1: Saves checkpoint to `trained/dual_vae_stage1/checkpoint_best.pt`
+- Stage 2: Saves final model to `trained/dual_vae_stage2/` with complete dual-branch VAE
 
 #### B. Training the Latent Diffusion Model
+Update parameters and explain gridsearch
 
 ```bash
 cd Diffusion_model
 python train.py \
   --root-dir ../data/rve_5k_xy \
-  --vae-path ../VAE_model/trained/vae_new_8 \
+  --vae-path ../VAE_model/trained/dual_vae_stage2 \
   --predictor-type latent-diffusion \
   --in-channels 9 \
-  --out-channels 4 \
+  --out-channels 8 \
   --features 64 128 256 512 \
   --batch-size 3 \
   --num-epochs 200 \
@@ -152,8 +178,9 @@ python train.py \
 ```
 
 **Key parameters**:
-- `--in-channels 9`: Microstructure (1) + velocity latent (4) + time embedding
-- `--out-channels 4`: Must match VAE latent channels
+- `--vae-path`: Path to the stage 2 dual-branch VAE checkpoint
+- `--in-channels 9`: Microstructure (1) + velocity latent (8) + time embedding
+- `--out-channels 8`: Must match VAE latent channels (typically 4 or 8)
 - `--use-3d True`: Loads 3D velocity datasets
 - `--lambda-*`: Physics-informed loss weights (set to 0 to disable)
 
@@ -170,30 +197,32 @@ python train.py \
 cd Diffusion_model
 python evaluate.py \
   --dataset-dir ../data/rve_5k_xy \
-  --vae-path ../VAE_model/trained/vae_new_8 \
+  --vae-path ../VAE_model/trained/dual_vae_stage2 \
   --diffusion-path trained/[timestamp]_unet_latent-diffusion_[params]
 ```
 
 **Visualization and physics metrics**:
 
+Update Check this is actually doing what the title says
+
 ```bash
 python scripts/evaluate_diffusion_vae.py \
   --dataset-dir ../data/rve_5k_xy \
-  --vae-path ../VAE_model/trained/vae_new_8 \
+  --vae-path ../VAE_model/trained/dual_vae_stage2 \
   --diffusion-path trained/[timestamp]_unet_latent-diffusion_[params]
 ```
 
 #### D. Running Inference
 
-Single-sample prediction using a trained model:
+Single-sample prediction using a trained model (index can be changed to infere a different sample):
 
 ```bash
 python Inference/inference.py \
   Diffusion_model/trained/[timestamp]_unet_latent-diffusion_[params] \
-  --vae-path VAE_model/trained/vae_new_8 \
+  --vae-path VAE_model/trained/dual_vae_stage2 \
   --index 0
 ```
-
+Update: Is this in the right section? Shouldn't it be C
 **Output**: Saves predictions to `predictions/` directory with velocity fields and optional visualization.
 
 #### E. Visualizing Training Progress
@@ -224,20 +253,26 @@ project_root/
 ├── data/                          # Dataset storage
 │   └── rve_5k_xy/                # Main dataset (auto-downloaded)
 │
-├── VAE_model/                     # Variational Autoencoder component
-│   ├── pretrain_vae.py           # VAE training entry point
+├── VAE_model/                     # Variational Autoencoder component (Dual-Branch)
+│   ├── train_3d_vae_only.py      # Stage 1: Train 3D VAE (E3D + D3D)
+│   ├── train_2d_with_cross.py    # Stage 2: Train 2D VAE with alignment & cross-reconstruction
+│   ├── inference_vae.py          # VAE inference utility
 │   ├── config/
 │   │   └── vae.py                # VAE configuration
 │   ├── src/
 │   │   ├── common.py             # Shared utilities
+│   │   ├── dual_vae/
+│   │   │   ├── __init__.py
+│   │   │   └── model.py          # DualBranchVAE architecture (E2D, D2D, E3D, D3D)
 │   │   └── vae/
-│   │       ├── autoencoder.py    # VAE architecture (encoder + decoder)
+│   │       ├── autoencoder.py    # Standard VAE (encoder + decoder)
 │   │       ├── encoder.py        # 3D encoder with attention
 │   │       ├── decoder.py        # Mirror decoder
 │   │       └── blocks.py         # Residual and attention blocks
 │   └── utils/
-│       ├── dataset.py            # VAE dataset loader
-│       └── metrics.py            # Loss functions
+│       ├── dataset.py            # VAE dataset loader with 2D/3D support
+│       ├── metrics.py            # Loss functions (normalized MAE, KL divergence)
+│       └── paired_sampler.py     # Sampler for paired 2D/3D data
 │
 ├── Diffusion_model/               # Main latent diffusion component
 │   ├── train.py                  # Training entry point
@@ -280,29 +315,48 @@ project_root/
 
 ### Architecture Design
 
-#### 1. **Variational Autoencoder (VAE)**
+#### 1. **Variational Autoencoder (VAE) - Dual-Branch Architecture**
 
-**Purpose**: Compress 3D velocity fields into a lower-dimensional latent space.
+**Purpose**: Learn separate latent representations for 2D and 3D velocity fields with alignment between them.
 
 **Architecture**:
-- **Encoder**: 3-stage 3D convolution network with residual blocks and attention
-  - Input: `(batch, 3, depth, height, width)` (3D velocity field)
-  - Output: `(batch, latent_channels, depth/1, height/4, width/4)` (latent code)
-  - Depth is preserved; spatial dimensions reduced by 4x
-  
-- **Decoder**: Mirror architecture reconstructing 3D velocity from latents
-  - Input: `(batch, latent_channels, depth, height/4, width/4)`
-  - Output: `(batch, 3, depth, height, width)` (reconstructed velocity)
+- **2D Branch**: Encoder E2D + Decoder D2D
+  - Input: 2D velocity field `(batch, 3, height, width)` where vz=0
+  - Output: 2D latent `(batch, latent_channels, height/4, width/4)`
+
+- **3D Branch**: Encoder E3D + Decoder D3D
+  - Input: 3D velocity field `(batch, 3, depth, height, width)` with non-zero vz
+  - Output: 3D latent `(batch, latent_channels, depth, height/4, width/4)`
+
+- **Key Innovation**: Cross-reconstruction loss forces E2D to learn sufficient information for D3D to predict the w-component (vertical velocity)
+
+**Training Process** (Two Stages):
+
+*Stage 1*: Train 3D VAE (E3D + D3D) on 3D velocity fields only
+- Loss: Reconstruction + KL divergence
+- Establishes the 3D compression baseline
+
+*Stage 2*: Train 2D VAE with alignment and cross-reconstruction
+- Train E2D + D2D on 2D samples
+- Alignment loss: Encourage E2D and E3D latents to be similar for paired data
+- Cross-reconstruction loss: E2D → D3D (forces E2D to learn w-component information)
+- Combined loss: `L_rec_2d + L_rec_3d + λ_align * L_align + λ_cross * L_cross + β_kl * KL`
 
 **Key Design Choices**:
 - **Asymmetric padding** in stride-2 convolutions prevents checkerboard artifacts
 - **Attention blocks** capture long-range dependencies in flow patterns
 - **Beta (KL weighting)**: Set to `1e-3` to focus on reconstruction quality over perfect posterior matching
-- **Scale factor normalization**: Velocity divided by `0.004389` during training for stable gradients
+- **Per-component normalization**: Optional per-channel statistics (u, v, w) for better w-component learning
+- **Scale factor normalization**: Velocity divided by dataset-specific scale factor for stable gradients
 
-**Training Loss**:
+**Training Loss** (Stage 1):
 ```
-Loss = Reconstruction Loss + 1e-3 * KL Divergence
+Loss = Reconstruction Loss + β_kl * KL Divergence
+```
+
+**Training Loss** (Stage 2):
+```
+Loss = L_rec_2d + L_rec_3d + λ_align * L_align + λ_cross * L_cross + β_kl * (KL_2d + KL_3d)
 ```
 
 #### 2. **Latent Diffusion Model**
@@ -315,17 +369,18 @@ Loss = Reconstruction Loss + 1e-3 * KL Divergence
   - 2D velocity field (initial guess): `(batch, num_slices, 3, H, W)` where vz=0
   
 - **Processing Pipeline**:
-  1. Encode target 3D velocity → VAE latent space (frozen encoder)
+  1. Encode 2D velocity slices → VAE E2D latent space (frozen encoder)
   2. Add random noise (forward diffusion process)
   3. Train U-Net to predict noise conditioned on:
      - Microstructure
-     - 2D velocity latent features (from frozen VAE encoder applied to 2D input)
+     - 2D velocity latent features (from frozen VAE E2D applied to 2D input)
      - Timestep embedding
   4. During inference: iteratively denoise from random noise using trained U-Net
-  5. Decode final latent → 3D velocity field (frozen decoder)
+  5. Decode final latent → 3D velocity field using VAE D3D (frozen decoder)
 
 **Key Design Choices**:
-- **Frozen encoder/decoder**: Prevents catastrophic forgetting of VAE compression
+- **Frozen E2D/D3D**: Prevents catastrophic forgetting of VAE compression
+- **Cross-branch decoding**: Uses E2D for encoding (trained on 2D) but D3D for decoding (outputs 3D), leveraging stage 2 alignment loss
 - **Multi-scale U-Net**: Features `[64, 128, 256, 512]` for capturing multi-scale flow patterns
 - **Timestep embedding**: Sinusoidal positional encoding for diffusion step awareness
 - **Conditional features**: Early concatenation of microstructure and velocity latents
@@ -369,25 +424,21 @@ Optional training objective to incorporate physical constraints:
 
 ### Main Difficulties and Solutions
 
-#### 1. **3D Velocity Component Imbalance**
+#### 1. **VAE Training Stability and W-Component Learning**
 
-**Problem**: Model predicted vx and vy well but struggled with vz (vertical component).
+**Problem**: Model could collapse to near-zero latents or struggle with w-component prediction.
 
 **Solution**: 
-- Applied z-component specific losses and attention mechanisms
+- Two-stage training separates 3D baseline learning from 2D alignment
+- Cross-reconstruction loss in stage 2 directly forces E2D to learn w-component information
+- Per-component normalization option to give w-component more weight
+- Reduced KL weight from 1e-0 to 1e-3 (prioritizing reconstruction)
+- Applied scale factor normalization for stable gradients
+- Used normalized MAE loss (divides by target magnitude) for scale-invariant training
 - Documented in [W_COMPONENT_FIX.md](Diffusion_model/docs/W_COMPONENT_FIX.md)
 - Additional diagnostics in `scripts/diagnose_w_component.py`
 
-#### 2. **VAE Latent Space Stability**
-
-**Problem**: VAE would collapse to near-zero latents, losing velocity information.
-
-**Solution**:
-- Reduced KL weight from 1e-0 to 1e-3 (prioritizing reconstruction)
-- Applied scale factor normalization (divide by 0.004389) for stable gradients
-- Used normalized MAE loss (divides by target magnitude) for scale-invariant training
-
-#### 3. **Physics Loss Integration**
+#### 2. **Physics Loss Integration**
 
 **Problem**: Physics constraints conflicted with data fitting; training became unstable.
 
@@ -397,7 +448,7 @@ Optional training objective to incorporate physical constraints:
 - Used detached metrics for logging to avoid gradient contamination
 - Documented tuning guide in [PHYSICS_INFORMED_TRAINING.md](Diffusion_model/docs/PHYSICS_INFORMED_TRAINING.md)
 
-#### 4. **Dataset Consistency**
+#### 3. **Dataset Consistency**
 
 **Problem**: VAE and diffusion models used different data splits, causing train-test mismatch.
 
@@ -406,7 +457,7 @@ Optional training objective to incorporate physical constraints:
 - Ensured same test samples used for both model evaluations
 - Generated shared `statistics.json` for normalization consistency
 
-#### 5. **Path and Configuration Management**
+#### 4. **Path and Configuration Management**
 
 **Problem**: Model paths broken when loading across different machines/directories.
 
@@ -424,37 +475,43 @@ Optional training objective to incorporate physical constraints:
 - **Mitigation**: Evaluate reconstruction quality on VAE; consider increasing latent channels if needed
 - **Trade-off**: More latent channels → slower training and diffusion inference
 
-#### 2. **Fixed Depth Preservation**
+#### 2. **Two-Stage VAE Training Complexity**
+
+- **Limitation**: Requires sequential training of stage 1 (3D VAE) then stage 2 (2D VAE with alignment)
+- **Mitigation**: Automate stage transitions; monitor alignment loss convergence
+- **Benefit**: Allows proper learning of w-component without catastrophic forgetting
+
+#### 3. **Fixed Depth Preservation**
 
 - **Limitation**: VAE preserves depth (num_slices) without downsampling; only spatial dimensions reduced
 - **Rationale**: Depth is typically small (11 slices) so cost is minimal
 - **Impact**: Assumes depth information is important; may be sub-optimal for very large depths
 
-#### 3. **Conditional Dependence on 2D Field**
+#### 4. **Conditional Dependence on 2D Field**
 
 - **Limitation**: Model always requires 2D velocity input; cannot generate purely from microstructure alone
 - **Rationale**: 2D field provides strong anchor for physical realism
 - **Limitation**: Assumes 2D field is accurate; errors compound to 3D prediction
 
-#### 4. **Batch Normalization in Inference**
+#### 5. **Batch Normalization in Inference**
 
 - **Limitation**: Batch norm layers use running statistics; single-sample inference may be suboptimal
 - **Mitigation**: Use model in eval mode; consider layer norm alternative for better single-sample performance
 - **Addressed via**: Inference script averages over stochastic samples
 
-#### 5. **Physics Loss Uncertainty**
+#### 6. **Physics Loss Uncertainty**
 
 - **Limitation**: Physics loss weights are hyperparameters; no automated tuning mechanism
 - **Mitigation**: Grid search and ablation studies recommended (see PHYSICS_INFORMED_TRAINING.md)
 - **Cost**: Each weight combination requires full retraining
 
-#### 6. **Limited to Steady-State Flows**
+#### 7. **Limited to Steady-State Flows**
 
 - **Limitation**: Model trained on steady-state, incompressible flows only
 - **Scope**: Only handles Darcy-scale (low-Reynolds) flow in porous media
 - **Future work**: Extension to transient or turbulent flows requires architectural changes
 
-#### 7. **Dataset-Specific Normalization**
+#### 8. **Dataset-Specific Normalization**
 
 - **Limitation**: Normalization constants (scale_factor, max values) are dataset-specific
 - **Risk**: Transfer to new datasets requires recomputing statistics
