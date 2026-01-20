@@ -1,3 +1,30 @@
+"""
+DDPM Diffusion Scheduler for Latent Diffusion Model.
+
+This module implements the noise scheduling and sampling procedures for the
+denoising diffusion probabilistic model (DDPM) operating in the VAE latent space.
+
+Key concepts:
+- Forward diffusion: q(x_t | x_0) gradually adds noise over T timesteps
+- Reverse diffusion: p(x_{t-1} | x_t) learned by the U-Net to denoise
+- The U-Net predicts the noise (epsilon), not x_0 directly
+
+The scheduler uses a linear beta schedule from 0.0001 to 0.02 over 1000 timesteps.
+
+Usage:
+    scheduler = DiffusionScheduler(num_timesteps=1000, device='cuda')
+    
+    # Forward: add noise to clean latent
+    x_t = scheduler.q_sample(x_start=clean_latent, t=timestep, noise=noise)
+    
+    # Reverse: remove noise using model prediction
+    x_prev = scheduler.p_sample(model_output=predicted_noise, x_t=x_t, t=t)
+
+References:
+    Ho et al. (2020) "Denoising Diffusion Probabilistic Models"
+    https://arxiv.org/abs/2006.11239
+"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

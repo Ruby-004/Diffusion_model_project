@@ -1,3 +1,25 @@
+"""
+Training helper functions for latent diffusion model.
+
+This module provides the core training infrastructure including:
+    - Model initialization (`set_model`)
+    - Training/validation epoch runners (`run_epoch`)
+    - Normalization parameter loading (`get_norm_params`)
+    - Physics-informed loss integration
+
+Usage:
+    # Initialize model
+    predictor = set_model('latent-diffusion', model_kwargs, norm_file)
+    
+    # Run training epoch
+    train_loss = run_epoch(predictor, train_loader, optimizer, epoch, device, 
+                           mode='train', physics_loss=physics_loss)
+    
+    # Run validation epoch  
+    val_loss = run_epoch(predictor, val_loader, optimizer, epoch, device,
+                         mode='valid', physics_loss=physics_loss)
+"""
+
 from typing import Callable, Literal, Union, Dict
 import json
 import os

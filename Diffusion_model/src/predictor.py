@@ -1,3 +1,29 @@
+"""
+Predictor classes for flow field prediction.
+
+This module contains the `LatentDiffusionPredictor` - the main predictor class for
+predicting 3D flow fields from 2D microstructures using multi-step diffusion in
+VAE latent space.
+
+Architecture Overview:
+    2D Input (microstructure + 2D flow) → E2D Encoder → Latent z
+                                                          ↓
+                                              Diffusion U-Net (denoising)
+                                                          ↓
+                                              D3D Decoder → 3D Flow Output
+
+Key Components:
+    - LatentDiffusionPredictor: Main predictor combining VAE encoding/decoding with 
+      diffusion-based denoising for 3D flow prediction.
+    - DualBranchVAE: Supports separate E2D (2D encoder) and D3D (3D decoder) branches
+      trained in two stages.
+
+Training Pipeline:
+    Stage 1: Train E3D + D3D on 3D velocity (VAE_model/train_3d_vae_only.py)
+    Stage 2: Train E2D aligned to E3D latent space (VAE_model/train_2d_with_cross.py)
+    Stage 3: Train diffusion U-Net (Diffusion_model/train.py)
+"""
+
 from abc import ABC, abstractmethod
 from typing import Union, Any
 import json
@@ -371,13 +397,9 @@ class LatentDiffusionPredictor(Predictor):
                 encoder_path = vae_encoder_path if vae_encoder_path is not None else vae_path
                 decoder_path = vae_decoder_path if vae_decoder_path is not None else vae_path
                 
-                # Convert to absolute paths if relative
-                if not osp.isabs(encoder_path):
-                    project_root = osp.abspath(osp.join(osp.dirname(__file__), '..', '..'))
-                    encoder_path = osp.join(project_root, encoder_path)
-                if not osp.isabs(decoder_path):
-                    project_root = osp.abspath(osp.join(osp.dirname(__file__), '..', '..'))
-                    decoder_path = osp.join(project_root, decoder_path)
+                # Convert to absolute paths if relative (resolve from CWD)
+                encoder_path = osp.abspath(encoder_path)
+                decoder_path = osp.abspath(decoder_path)
                 
                 print(f"  Encoder from: {encoder_path}")
                 print(f"  Decoder from: {decoder_path}")
@@ -554,16 +576,27 @@ class LatentDiffusionPredictor(Predictor):
         # Permute to (batch, channels, num_slices, H, W) for 3D VAE
         velocity_2d_permuted = velocity_2d.permute(0, 2, 1, 3, 4)  # (batch, 3, num_slices, H, W)
         
+        # CRITICAL FIX: Normalize velocity_2d before encoding (VAE was trained with normalized inputs)
+        # Reshape for normalizer: (batch*depth, channels, H, W)
+        v2d_shape = velocity_2d_permuted.shape  # (batch, 3, depth, H, W)
+        velocity_2d_flat = velocity_2d_permuted.permute(0, 2, 1, 3, 4).contiguous().reshape(
+            v2d_shape[0] * v2d_shape[2], v2d_shape[1], v2d_shape[3], v2d_shape[4]
+        )  # (batch*depth, 3, H, W)
+        velocity_2d_flat_norm = self.normalizer['output'](velocity_2d_flat)
+        velocity_2d_norm_5d = velocity_2d_flat_norm.reshape(
+            v2d_shape[0], v2d_shape[2], v2d_shape[1], v2d_shape[3], v2d_shape[4]
+        ).permute(0, 2, 1, 3, 4)  # (batch, 3, depth, H, W)
+        
         # Encode 2D velocity to latent space for conditioning
         # CRITICAL: Use deterministic encoding (mu only) for consistent conditioning
         with torch.no_grad():
             if self.vae_is_dual:
                 # Dual VAE: use E2D encoder deterministically (mu only, no sampling)
-                velocity_2d_latent_5d, _ = self.vae.encode_2d_deterministic(velocity_2d_permuted)
+                velocity_2d_latent_5d, _ = self.vae.encode_2d_deterministic(velocity_2d_norm_5d)
             else:
                 # Standard VAE: use condition=False for U_2d (2D flow with w=0)
                 condition_2d = torch.zeros(batch_size, dtype=torch.bool, device=device) if self.vae_conditional else None
-                velocity_2d_latent_5d, _ = self.vae.encode(velocity_2d_permuted, condition=condition_2d)  # (batch, latent_channels, depth, H/4, W/4) - depth preserved!
+                velocity_2d_latent_5d, _ = self.vae.encode(velocity_2d_norm_5d, condition=condition_2d)  # (batch, latent_channels, depth, H/4, W/4) - depth preserved!
         
         # Permute to (batch, depth, latent_channels, H, W)
         velocity_2d_latent = velocity_2d_latent_5d.permute(0, 2, 1, 3, 4)
@@ -651,16 +684,28 @@ class LatentDiffusionPredictor(Predictor):
              latent_depth = latent_shape[2]
              latent_h, latent_w = latent_shape[3], latent_shape[4]
              
-        # Prepare conditioning (Copy from forward)
+        # Prepare conditioning
         velocity_2d_permuted = velocity_2d.permute(0, 2, 1, 3, 4)
+        
+        # CRITICAL FIX: Normalize velocity_2d before encoding (VAE was trained with normalized inputs)
+        # Reshape for normalizer: (batch*depth, channels, H, W)
+        v2d_shape = velocity_2d_permuted.shape  # (batch, 3, depth, H, W)
+        velocity_2d_flat = velocity_2d_permuted.permute(0, 2, 1, 3, 4).contiguous().reshape(
+            v2d_shape[0] * v2d_shape[2], v2d_shape[1], v2d_shape[3], v2d_shape[4]
+        )  # (batch*depth, 3, H, W)
+        velocity_2d_flat_norm = self.normalizer['output'](velocity_2d_flat)
+        velocity_2d_norm_5d = velocity_2d_flat_norm.reshape(
+            v2d_shape[0], v2d_shape[2], v2d_shape[1], v2d_shape[3], v2d_shape[4]
+        ).permute(0, 2, 1, 3, 4)  # (batch, 3, depth, H, W)
+        
         with torch.no_grad():
             if self.vae_is_dual:
                 # Dual VAE: use E2D encoder deterministically (mu only, no sampling)
-                velocity_2d_latent_5d, _ = self.vae.encode_2d_deterministic(velocity_2d_permuted)
+                velocity_2d_latent_5d, _ = self.vae.encode_2d_deterministic(velocity_2d_norm_5d)
             else:
                 # Standard VAE: use condition=False for U_2d (2D flow with w=0)
                 condition_2d = torch.zeros(batch_size, dtype=torch.bool, device=device) if self.vae_conditional else None
-                velocity_2d_latent_5d, _ = self.vae.encode(velocity_2d_permuted, condition=condition_2d)
+                velocity_2d_latent_5d, _ = self.vae.encode(velocity_2d_norm_5d, condition=condition_2d)
         velocity_2d_latent = velocity_2d_latent_5d.permute(0, 2, 1, 3, 4)
         
         feats_flat = self.pre_process(img_flat)
@@ -774,13 +819,25 @@ class LatentDiffusionPredictor(Predictor):
              
         # Prepare conditioning
         velocity_2d_permuted = velocity_2d.permute(0, 2, 1, 3, 4)
+        
+        # CRITICAL FIX: Normalize velocity_2d before encoding (VAE was trained with normalized inputs)
+        # Reshape for normalizer: (batch*depth, channels, H, W)
+        v2d_shape = velocity_2d_permuted.shape  # (batch, 3, depth, H, W)
+        velocity_2d_flat = velocity_2d_permuted.permute(0, 2, 1, 3, 4).contiguous().reshape(
+            v2d_shape[0] * v2d_shape[2], v2d_shape[1], v2d_shape[3], v2d_shape[4]
+        )  # (batch*depth, 3, H, W)
+        velocity_2d_flat_norm = self.normalizer['output'](velocity_2d_flat)
+        velocity_2d_norm_5d = velocity_2d_flat_norm.reshape(
+            v2d_shape[0], v2d_shape[2], v2d_shape[1], v2d_shape[3], v2d_shape[4]
+        ).permute(0, 2, 1, 3, 4)  # (batch, 3, depth, H, W)
+        
         with torch.no_grad():
             if self.vae_is_dual:
                 # Use deterministic encoding (mu only, no sampling) for consistent conditioning
-                velocity_2d_latent_5d, _ = self.vae.encode_2d_deterministic(velocity_2d_permuted)
+                velocity_2d_latent_5d, _ = self.vae.encode_2d_deterministic(velocity_2d_norm_5d)
             else:
                 condition_2d = torch.zeros(batch_size, dtype=torch.bool, device=device) if self.vae_conditional else None
-                velocity_2d_latent_5d, _ = self.vae.encode(velocity_2d_permuted, condition=condition_2d)
+                velocity_2d_latent_5d, _ = self.vae.encode(velocity_2d_norm_5d, condition=condition_2d)
         velocity_2d_latent = velocity_2d_latent_5d.permute(0, 2, 1, 3, 4)
         
         feats_flat = self.pre_process(img_flat)

@@ -1,3 +1,22 @@
+"""
+Configuration and argument parsing for latent diffusion model training.
+
+This module defines all CLI arguments for train.py, evaluate.py, and gridsearch_diffusion.py.
+
+Key argument groups:
+    - Dataset: root-dir, batch-size, augment, use-3d, num-slices
+    - Training: learning-rate, num-epochs, cost-function, predictor-type
+    - Model: in-channels, out-channels, features, attention
+    - Physics losses: lambda-div, lambda-flow, lambda-smooth, lambda-laplacian
+    - VAE paths: vae-path, vae-encoder-path, vae-decoder-path
+
+Example usage:
+    python train.py --root-dir data/dataset --in-channels 17 --out-channels 8 \
+        --vae-encoder-path VAE_model/trained/stage2 \
+        --vae-decoder-path VAE_model/trained/stage1 \
+        --features 64 128 256 512 1024 --attention "3..2" --batch-size 3
+"""
+
 import argparse
 import os
 import os.path as osp
@@ -129,8 +148,11 @@ group_train.add_argument(
     '--cost-function',
     type=str,
     default='normalized_mae_loss',
-    choices=['normalized_mae_loss', 'normalized_mse_loss', 'normalized_exp_loss', 'mae_loss', 'mse_loss', 'huber_loss', 'normalized_mae_loss_per_component', 'mae_loss_per_component', 'normalized_mse_loss_per_component'],
-    help='Cost function for training.'
+    choices=['normalized_mae_loss', 'normalized_mse_loss', 'mae_loss', 'mse_loss', 'huber_loss', 
+             'normalized_mae_loss_per_component', 'mae_loss_per_component', 
+             'mse_loss_per_component', 'normalized_mse_loss_per_component'],
+    help='Cost function for training. Default: normalized_mae_loss (scale-invariant). '
+         'Use per_component variants for better w-component learning.'
 )
 group_train.add_argument(
     '--lambda-div',

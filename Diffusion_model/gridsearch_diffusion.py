@@ -60,12 +60,12 @@ BASE_CONFIG = {
         "weight_decay": 0.0,
         "scheduler": {"flag": False, "gamma": 0.95499},
         "num_epochs": 10,  # Grid search uses 10 epochs per combo
-        "cost_function": "normalized_mae_loss",
+        "cost_function": "normalized_mse_loss",
         "lambda_div": 0.0,
         "lambda_flow": 0.0,
         "lambda_smooth": 0.0,
         "lambda_laplacian": 0.0,
-        "physics_loss_freq": 1,
+        "physics_loss_freq": 0,
         "lambda_velocity": 0.0,
         "weight_u": 1.0,
         "weight_v": 1.0,
@@ -117,12 +117,14 @@ GRID = {
     "features": [
         [64, 128, 256, 512],           # depth 4
         [64, 128, 256, 512, 1024],     # depth 5 (baseline)
+        [64, 128, 256, 512, 1024, 2048],
+        [32, 64, 128, 256, 512, 1024]
     ],
     
     # Kernel size
     # 3: baseline, faster
     # 5: larger receptive field, may capture longer-range patterns
-    "kernel_size": [3, 5],
+    "kernel_size": [3],
     
     # Attention settings
     # "3..2": attention from level 3 to max, 2 heads (baseline)
@@ -131,23 +133,23 @@ GRID = {
     
     # Learning rate
     # Center: 1e-4, explore 0.5x and 2x
-    "learning_rate": [5e-5, 1e-4, 2e-4],
+    "learning_rate": [5e-5, 1e-4, 5e-4],
     
     # Dropout for regularization
-    "dropout": [0.0, 0.05],
+    "dropout": [0.0],
     
     # Time embedding dimension (kept fixed to reduce search space)
-    "time_embedding_dim": [64],
+    "time_embedding_dim": [64, 128],
 }
 
 # Fixed random seed for reproducibility
 RANDOM_SEED = 42
 
 # Number of epochs per grid search run
-NUM_EPOCHS = 10
+NUM_EPOCHS = 15
 
 # Output directory for grid search results
-OUTPUT_DIR = "./trained/gridsearch/"
+OUTPUT_DIR = "./trained/gridsearchmse/"
 
 
 # =============================================================================
@@ -599,8 +601,8 @@ def main():
     total_combos = len(all_combos)
     print(f"\nTotal hyperparameter combinations: {total_combos}")
     
-    if total_combos > 60:
-        print(f"WARNING: Combination count {total_combos} exceeds hard cap of 60!")
+    if total_combos > 150:  # Increased cap to allow larger searches
+        print(f"WARNING: Combination count {total_combos} exceeds hard cap of 150!")
         print("Consider reducing the search space.")
         return
     

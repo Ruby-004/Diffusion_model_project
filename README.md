@@ -1,118 +1,212 @@
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE.md)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/camp-lab-tud/arbitrary-microstructure-flow/pulls)
-![Python](https://img.shields.io/badge/python-3.10.12-blue.svg)
-[![Scc Count Badge](https://sloc.xyz/github/camp-lab-tud/arbitrary-microstructure-flow?category=code)](https://github.com/camp-lab-tud/arbitrary-microstructure-flow)
-![Repo Size](https://img.shields.io/github/repo-size/camp-lab-tud/arbitrary-microstructure-flow)
+![Python](https://img.shields.io/badge/python-3.10+-blue.svg)
 
-[![DOI](https://zenodo.org/badge/DOI/10.1016/j.compositesa.2025.109337.svg)](https://doi.org/10.1016/j.compositesa.2025.109337)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.16940478.svg)](https://doi.org/10.5281/zenodo.16940478)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17306446.svg)](https://doi.org/10.5281/zenodo.17306446)
-
-
-# Predicting flow in arbitrary fibrous microstructures
+# 3D Flow Prediction via Latent Diffusion
 
 ## 📖 Overview
-This repository contains the source code for the ML model and sliding-window technique described in our paper: 
 
-[Jimmy Gaspard Jean](https://camp-lab.org/members/jimmy-jean.html),
-[Guillaume Broggi](https://camp-lab.org/members/guillaume-broggi.html),
-[Baris Caglar](https://camp-lab.org/members/baris-caglar.html) (2026).<br>
-[**An image-based deep learning framework for flow field prediction in arbitrary-sized fibrous microstructures**](https://doi.org/10.1016/j.compositesa.2025.109337).<br>
-Composites Part A: Applied Science and Manufacturing, Volume 200, 109337, ISSN 1359-835X
+This repository predicts **3D resin flow fields** (velocity vx, vy, vz) in fibrous composite microstructures using a **latent diffusion model**. Given a 2D microstructure image and 2D flow field (where vz=0), the model predicts the full 3D flow field including the out-of-plane vz component.
 
+### Architecture Pipeline
 
-### BibTeX
-If you use the code, please cite us:
 ```
-@article{JEAN2026109337,
-title = {An image-based deep learning framework for flow field prediction in arbitrary-sized fibrous microstructures},
-journal = {Composites Part A: Applied Science and Manufacturing},
-volume = {200},
-pages = {109337},
-year = {2026},
-issn = {1359-835X},
-doi = {https://doi.org/10.1016/j.compositesa.2025.109337},
-url = {https://www.sciencedirect.com/science/article/pii/S1359835X25006311},
-author = {Jimmy Gaspard Jean and Guillaume Broggi and Baris Caglar}
-}
+2D Microstructure + 2D Flow (vz=0)
+         ↓
+    E2D Encoder (Stage 2)
+         ↓
+    Latent z (8 channels)
+         ↓
+    Diffusion U-Net (denoising)
+         ↓
+    D3D Decoder (Stage 1)
+         ↓
+    3D Flow Field (vx, vy, vz)
 ```
 
-### Abstract
-<img src="figs/graphic_abstract.jpg">
+### Training Pipeline
 
-Numerical simulations are commonly used to predict resin flow in fibrous reinforcements but exhibit a trade-off between accuracy and computational cost. As an alternative, machine learning (ML) based models pose as a potential tool to accelerate or replace such costly simulations. This work proposes an open-source image-based deep learning framework to estimate the permeability of unidirectional microstructures in arbitrarily sized domains. This presents a scalable step towards estimating the permeability of large meso-domains. First, we present two robust and accurate surrogate models capable of predicting microstructure velocity and pressure fields with varying physical dimensions, fiber diameter, and volume fraction. These predictions achieve 5% error on the training set and 8% error on unseen microstructures. Secondly, based on those predicted flow fields, we infer the permeability of the microstructures with respectively 4% and 6% deviation for the training and validation sets. Third, opposed to previous works limited to microstructures with a fixed aspect ratio, we propose a so-called *sliding window* procedure, based on physics-based principles to predict the resin velocity and pressure field in microstructures with different aspect ratios. The method is validated against high-fidelity numerical simulations, and its predictive performance and computational efficiency are confirmed with μ-CT scans of real microstructures. Finally, the presented code and surrogate model are open-sourced to promote further exploration by the scientific community.
+The model is trained in 3 stages:
 
+1. **Stage 1 (VAE 3D)**: Train E3D + D3D on 3D velocity fields for reconstruction
+2. **Stage 2 (VAE 2D + Alignment)**: Train E2D aligned to E3D latent space with cross-reconstruction (E2D→D3D)
+3. **Diffusion**: Train U-Net to denoise latents conditioned on 2D microstructure + 2D velocity
+
+---
 
 ## ⬇️ Getting Started
-> [!NOTE]
-> This codebase was developed and tested on [**Ubuntu 22.04.5 LTS**](https://releases.ubuntu.com/jammy/).
 
-Open the terminal of your computer. Change the current working directory to the location where you want to download the code. Then, run
+```bash
+git clone https://github.com/your-repo/Diffusion_model_project
+cd Diffusion_model_project
 ```
-git clone https://github.com/camp-lab-tud/arbitrary-microstructure-flow
-```
-```
-cd arbitrary-microstructure-flow/
-```
-## ⚙️ Setup
 
+### Setup
 
-Assuming that [Python 3.10.12](https://www.python.org/downloads/release/python-31012/) is installed on your computer, create a virtual environment in the main folder by running:
-```
-python3 -m venv ${ENV}
-```
-`${ENV}` (e.g., `.venv`) is the environment's name.
+```bash
+# Create virtual environment
+python -m venv .venv
 
-Activate the created `.venv` environment by running (on Linux):
-```
+# Activate (Linux/Mac)
 source .venv/bin/activate
-```
+# Activate (Windows PowerShell)
+.\.venv\Scripts\Activate.ps1
 
-Install the required dependencies:
-```
+# Install dependencies
 pip install -r requirements.txt
 ```
 
+### Dataset
 
-## 🚀 Inference
-For inference on the validation split of the [dataset](https://doi.org/10.5281/zenodo.16940478), one can run the following script. It will perform velocity or pressure field prediction, depending on the ML model provided. 
-```
-python eval.py --root-dir ${ROOT-DIR} --split 'valid' --directory-or-url ${DIRECTORY_OR_URL}
-```
-`${ROOT-DIR}` refers to the dataset directory. If the directory does not exist, the dataset will be automatically [downloaded](https://zenodo.org/records/16940478/files/dataset.zip?download=1) and extracted to `${ROOT-DIR}`. `${DIRECTORY_OR_URL}` is either 
+The 3D dataset should be placed at `C:\Users\alexd\Downloads\dataset_3d` (or specify via `--dataset-dir`).
 
-- the URL to one of the released [pre-trained model weights](https://doi.org/10.5281/zenodo.17306446), or
-- the path to a local directory with the trained model files.
+Required files in `dataset_3d/x/`:
+- `domain.pt` - 2D microstructure (N, 1, H, W)
+- `U_2d.pt` - 2D velocity input (N, num_slices, 3, H, W) where vz=0
+- `U.pt` - 3D velocity target (N, num_slices, 3, H, W)
+- `statistics.json` - Normalization statistics
 
-For instance,
-```
-python eval.py --root-dir 'data/dataset' --split 'valid' --directory-or-url 'https://zenodo.org/records/17306446/files/velocity_model_base.zip?download=1' 
+---
+
+## 🚀 How to Run
+
+### Stage 1: Train 3D VAE (E3D + D3D)
+
+```bash
+cd VAE_model
+python train_3d_vae_only.py \
+    --dataset-dir "C:/Users/alexd/Downloads/dataset_3d" \
+    --save-dir "trained/dual_vae_stage1_3d" \
+    --latent-channels 8 \
+    --batch-size 2 \
+    --num-epochs 50 \
+    --per-component-norm
 ```
 
-## 🪟 Sliding Window
-<img src="figs/sliding_window.jpg">
+### Stage 2: Train 2D Encoder with Alignment (E2D)
 
-The code implementation of the *sliding window* procedure (for making inference on rectangular microstructures) is available in the [src/apps.py](src/apps.py) file.
+```bash
+cd VAE_model
+python train_2d_with_cross.py \
+    --dataset-dir "C:/Users/alexd/Downloads/dataset_3d" \
+    --save-dir "trained/dual_vae_stage2_2d" \
+    --stage1-checkpoint "trained/dual_vae_stage1_3d" \
+    --latent-channels 8 \
+    --batch-size 2 \
+    --num-epochs 50 \
+    --lambda-align 0.1 \
+    --lambda-cross 1.0 \
+    --per-component-norm
+```
 
-Moreover, we provide in [scripts/eval_micrograph.py](scripts/eval_micrograph.py) an example of making predictions on the [micrograph data](https://doi.org/10.5281/zenodo.6611926) from the [virtual permeability benchmark](https://doi.org/10.1016/j.compositesa.2022.107397) by Syerko et al. (2023).
-```
-python -m scripts.eval_micrograph --micrograph-dir '${MICROGRAPH_DIR}' --velocity-model ${VELOCITY_MODEL} --pressure-model ${PRESSURE_MODEL}
-```
-where `${MICROGRAPH_DIR}` is the directory containing the micrograph data. The data can be accessed from the [correspoding repository](https://doi.org/10.5281/zenodo.6611926). `${VELOCITY_MODEL}` and `${PRESSURE_MODEL}` are URLs to [pre-trained](https://doi.org/10.5281/zenodo.17306446) velocity and pressure models (e.g., [https://zenodo.org/records/17306446/files/velocity_model_base.zip?download=1](https://zenodo.org/records/17306446/files/velocity_model_base.zip?download=1) and [https://zenodo.org/records/17306446/files/pressure_model_base.zip?download=1](https://zenodo.org/records/17306446/files/pressure_model_base.zip?download=1)). Alternatively, the local path to the downloaded and extracted folders can be passed.
+### Stage 3: Train Latent Diffusion Model
 
+```bash
+cd Diffusion_model
+python train.py \
+    --root-dir "C:/Users/alexd/Downloads/dataset_3d" \
+    --vae-encoder-path "../VAE_model/trained/dual_vae_stage2_2d" \
+    --vae-decoder-path "../VAE_model/trained/dual_vae_stage1_3d" \
+    --predictor-type latent-diffusion \
+    --in-channels 17 --out-channels 8 \
+    --features 64 128 256 512 1024 \
+    --attention "3..2" \
+    --batch-size 3 \
+    --num-epochs 100 \
+    --learning-rate 1e-4 \
+    --use-3d True
+```
 
-## 💻 Training from scratch
-To train from scratch, run:
+### Inference
 
-(for the velocity field)
+```bash
+cd Inference
+python inference.py \
+    "../Diffusion_model/trained/YOUR_MODEL_DIR" \
+    --vae-encoder-path "../VAE_model/trained/dual_vae_stage2_2d" \
+    --vae-decoder-path "../VAE_model/trained/dual_vae_stage1_3d" \
+    --dataset-dir "C:/Users/alexd/Downloads/dataset_3d" \
+    --index 0
 ```
-python train.py --root-dir ${ROOT-DIR} --predictor-type 'velocity' --in-channels 1 --out-channels 2
+
+### Grid Search (Hyperparameter Tuning)
+
+```bash
+cd Diffusion_model
+python gridsearch_diffusion.py
 ```
-(for the pressure field)
+
+---
+
+## 📂 Project Structure
+
 ```
-python train.py --root-dir ${ROOT-DIR} --predictor-type 'pressure' --in-channels 2 --out-channels 1 --distance-transform ''
+├── Diffusion_model/           # Latent diffusion model
+│   ├── train.py               # Training script
+│   ├── evaluate.py            # Evaluation script
+│   ├── gridsearch_diffusion.py
+│   ├── config.py              # CLI arguments
+│   ├── src/
+│   │   ├── predictor.py       # LatentDiffusionPredictor
+│   │   ├── diffusion.py       # DDPM scheduler
+│   │   ├── helper.py          # Training loop
+│   │   ├── physics.py         # Physics-informed losses
+│   │   └── unet/              # U-Net architecture
+│   └── utils/
+│       └── dataset.py         # MicroFlowDataset
+│
+├── VAE_model/                 # VAE components
+│   ├── train_3d_vae_only.py   # Stage 1 training
+│   ├── train_2d_with_cross.py # Stage 2 training
+│   ├── inference_vae.py       # VAE visualization
+│   ├── src/
+│   │   ├── vae/               # Standard VAE (E3D/D3D)
+│   │   └── dual_vae/          # Dual-branch VAE
+│   └── utils/
+│       └── dataset.py         # MicroFlowDatasetVAE
+│
+├── Inference/
+│   └── inference.py           # End-to-end inference with Napari visualization
+│
+└── requirements.txt
 ```
-`${ROOT-DIR}` refers to a local directory containing this [dataset](https://doi.org/10.5281/zenodo.16940478).
+
+---
+
+## 🔧 Key Configuration Options
+
+### Diffusion Model
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--in-channels` | 17 | 1 (microstructure) + 8 (latent) + 8 (time embed) |
+| `--out-channels` | 8 | Must match VAE latent_channels |
+| `--features` | [64,128,256,512,1024] | U-Net depth (5 levels) |
+| `--attention` | "3..2" | Attention at levels 3+ with 2 heads |
+| `--num-slices` | 11 | Number of z-slices in 3D volume |
+
+### Physics Losses (Optional)
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--lambda-div` | 0.0 | Divergence loss (mass conservation) |
+| `--lambda-flow` | 0.0 | Flow-rate consistency |
+| `--lambda-smooth` | 0.0 | Gradient smoothness |
+| `--lambda-laplacian` | 0.0 | Laplacian smoothness |
+
+---
+
+## 📝 Removed Legacy Code
+
+The following legacy code from the original 2D→2D flow prediction project has been removed:
+
+- **Legacy predictors**: `VelocityPredictor`, `PressurePredictor` (replaced by `LatentDiffusionPredictor`)
+- **Legacy losses**: `mass_conservation_loss`, `mass_consv_loss`, `normalized_exp_loss` (replaced by `src/physics.py`)
+- **Legacy config options**: `predictor-type velocity/pressure` choices
+
+The physics-informed losses (`lambda_div`, `lambda_flow`, `lambda_smooth`, `lambda_laplacian`) are retained as they are still used for optional training regularization.
+
+---
 
 ## Questions
-For any question related to the code, feel free to contact [Jimmy G. Jean](https://github.com/jimmygjean) via email [[j.g.jean@tudelft.nl](mailto:j.g.jean@tudelft.nl)] or [LinkedIn](https://www.linkedin.com/in/jimmy-g-jean/).
+
+For questions, please open an issue or contact the maintainers.

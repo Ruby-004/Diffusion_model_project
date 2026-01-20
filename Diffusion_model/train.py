@@ -1,3 +1,28 @@
+"""
+Training script for latent diffusion model.
+
+This script trains a U-Net to denoise latents for 3D velocity prediction from 2D inputs.
+
+Prerequisites:
+    - Stage 1 VAE trained: VAE_model/train_3d_vae_only.py
+    - Stage 2 E2D trained: VAE_model/train_2d_with_cross.py
+
+Usage:
+    python train.py \\
+        --root-dir "path/to/dataset_3d" \\
+        --vae-encoder-path "VAE_model/trained/stage2" \\
+        --vae-decoder-path "VAE_model/trained/stage1" \\
+        --in-channels 17 --out-channels 8 \\
+        --features 64 128 256 512 1024 \\
+        --batch-size 3 --num-epochs 100
+
+Outputs:
+    - trained/<timestamp>_unet_latent-diffusion_<hyperparams>/
+        - model.pt: Final model weights
+        - best_model.pt: Best validation loss weights
+        - log.json: Training history and configuration
+"""
+
 import time
 import json
 import os.path as osp
