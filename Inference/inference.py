@@ -250,7 +250,165 @@ def main():
     print("Prediction complete.")
     print(f"Prediction output shape: {prediction.shape}")
 
-    # --- 6. Visualizer (Napari) ---
+    # --- 6a. Matplotlib 2D Slice Visualization with Colorbars ---
+    try:
+        import matplotlib.pyplot as plt
+        from matplotlib.colors import Normalize
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
+        
+        print("\nGenerating 2D slice visualization with velocity scale...")
+        
+        def to_numpy_plt(t):
+            return t[0].detach().cpu().numpy()
+        
+        # Get prediction data: (slices, 3, H, W)
+        pred_np = to_numpy_plt(prediction)
+        num_slices = pred_np.shape[0]
+        middle_slice = num_slices // 2
+        
+        # Calculate velocity magnitude
+        pred_mag = np.sqrt(np.sum(pred_np**2, axis=1))  # (slices, H, W)
+        
+        # Get microstructure
+        micro_np = to_numpy_plt(img)
+        if micro_np.ndim == 4 and micro_np.shape[1] == 1:
+            micro_np = micro_np[:, 0, :, :]  # (slices, H, W)
+        
+        # Get target if available
+        target_np = None
+        target_mag = None
+        if target_velocity is not None:
+            if target_velocity.dim() == 4:
+                target_velocity = target_velocity.unsqueeze(0)
+            target_np = to_numpy_plt(target_velocity)
+            target_mag = np.sqrt(np.sum(target_np**2, axis=1))
+        
+        # Find global min/max for consistent colorbar across pred/target
+        vmin_mag = pred_mag.min()
+        vmax_mag = pred_mag.max()
+        if target_mag is not None:
+            vmin_mag = min(vmin_mag, target_mag.min())
+            vmax_mag = max(vmax_mag, target_mag.max())
+        
+        # Create figure with colorbars
+        if target_np is not None:
+            fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+            fig.suptitle(f'Velocity Field Comparison (Slice {middle_slice}/{num_slices})', fontsize=14)
+            
+            # Row 1: Prediction
+            # Microstructure overlay
+            ax = axes[0, 0]
+            im = ax.imshow(pred_mag[middle_slice], cmap='coolwarm', vmin=vmin_mag, vmax=vmax_mag)
+            ax.contour(micro_np[middle_slice], levels=[0.5], colors='black', linewidths=0.5)
+            ax.set_title('Prediction: Velocity Magnitude')
+            ax.set_xlabel('X')
+            ax.set_ylabel('Y')
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("right", size="5%", pad=0.05)
+            cbar = plt.colorbar(im, cax=cax)
+            cbar.set_label('|V| (m/s)')
+            
+            # Vx component
+            ax = axes[0, 1]
+            vx_min, vx_max = pred_np[:, 0].min(), pred_np[:, 0].max()
+            if target_np is not None:
+                vx_min = min(vx_min, target_np[:, 0].min())
+                vx_max = max(vx_max, target_np[:, 0].max())
+            im = ax.imshow(pred_np[middle_slice, 0], cmap='coolwarm', vmin=vx_min, vmax=vx_max)
+            ax.contour(micro_np[middle_slice], levels=[0.5], colors='black', linewidths=0.5)
+            ax.set_title('Prediction: Vx')
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("right", size="5%", pad=0.05)
+            cbar = plt.colorbar(im, cax=cax)
+            cbar.set_label('Vx (m/s)')
+            
+            # Vy component  
+            ax = axes[0, 2]
+            vy_min, vy_max = pred_np[:, 1].min(), pred_np[:, 1].max()
+            if target_np is not None:
+                vy_min = min(vy_min, target_np[:, 1].min())
+                vy_max = max(vy_max, target_np[:, 1].max())
+            im = ax.imshow(pred_np[middle_slice, 1], cmap='coolwarm', vmin=vy_min, vmax=vy_max)
+            ax.contour(micro_np[middle_slice], levels=[0.5], colors='black', linewidths=0.5)
+            ax.set_title('Prediction: Vy')
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("right", size="5%", pad=0.05)
+            cbar = plt.colorbar(im, cax=cax)
+            cbar.set_label('Vy (m/s)')
+            
+            # Row 2: Target
+            ax = axes[1, 0]
+            im = ax.imshow(target_mag[middle_slice], cmap='coolwarm', vmin=vmin_mag, vmax=vmax_mag)
+            ax.contour(micro_np[middle_slice], levels=[0.5], colors='black', linewidths=0.5)
+            ax.set_title('Target: Velocity Magnitude')
+            ax.set_xlabel('X')
+            ax.set_ylabel('Y')
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("right", size="5%", pad=0.05)
+            cbar = plt.colorbar(im, cax=cax)
+            cbar.set_label('|V| (m/s)')
+            
+            ax = axes[1, 1]
+            im = ax.imshow(target_np[middle_slice, 0], cmap='coolwarm', vmin=vx_min, vmax=vx_max)
+            ax.contour(micro_np[middle_slice], levels=[0.5], colors='black', linewidths=0.5)
+            ax.set_title('Target: Vx')
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("right", size="5%", pad=0.05)
+            cbar = plt.colorbar(im, cax=cax)
+            cbar.set_label('Vx (m/s)')
+            
+            ax = axes[1, 2]
+            im = ax.imshow(target_np[middle_slice, 1], cmap='coolwarm', vmin=vy_min, vmax=vy_max)
+            ax.contour(micro_np[middle_slice], levels=[0.5], colors='black', linewidths=0.5)
+            ax.set_title('Target: Vy')
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("right", size="5%", pad=0.05)
+            cbar = plt.colorbar(im, cax=cax)
+            cbar.set_label('Vy (m/s)')
+            
+        else:
+            # No target - just show prediction
+            fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+            fig.suptitle(f'Predicted Velocity Field (Slice {middle_slice}/{num_slices})', fontsize=14)
+            
+            ax = axes[0]
+            im = ax.imshow(pred_mag[middle_slice], cmap='coolwarm', vmin=vmin_mag, vmax=vmax_mag)
+            ax.contour(micro_np[middle_slice], levels=[0.5], colors='black', linewidths=0.5)
+            ax.set_title('Velocity Magnitude')
+            ax.set_xlabel('X')
+            ax.set_ylabel('Y')
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("right", size="5%", pad=0.05)
+            cbar = plt.colorbar(im, cax=cax)
+            cbar.set_label('|V| (m/s)')
+            
+            ax = axes[1]
+            im = ax.imshow(pred_np[middle_slice, 0], cmap='coolwarm')
+            ax.contour(micro_np[middle_slice], levels=[0.5], colors='black', linewidths=0.5)
+            ax.set_title('Vx')
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("right", size="5%", pad=0.05)
+            cbar = plt.colorbar(im, cax=cax)
+            cbar.set_label('Vx (m/s)')
+            
+            ax = axes[2]
+            im = ax.imshow(pred_np[middle_slice, 1], cmap='coolwarm')
+            ax.contour(micro_np[middle_slice], levels=[0.5], colors='black', linewidths=0.5)
+            ax.set_title('Vy')
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("right", size="5%", pad=0.05)
+            cbar = plt.colorbar(im, cax=cax)
+            cbar.set_label('Vy (m/s)')
+        
+        plt.tight_layout()
+        plt.savefig('velocity_field_comparison.png', dpi=150, bbox_inches='tight')
+        print("Saved 2D visualization to 'velocity_field_comparison.png'")
+        plt.show()
+        
+    except Exception as e:
+        print(f"Error during matplotlib visualization: {e}")
+
+    # --- 6b. Visualizer (Napari) ---
     try:
         import napari
         

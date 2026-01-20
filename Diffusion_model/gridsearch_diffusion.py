@@ -43,7 +43,7 @@ from src.predictor import LatentDiffusionPredictor
 BASE_CONFIG = {
     "name": "gridsearch",
     "mode": "train",
-    "save_dir": "./trained/gridsearch/",
+    "save_dir": "./trained/gridsearch_per_component/",
     
     "dataset": {
         "root_dir": r"C:\Users\alexd\Downloads\dataset_3d",
@@ -60,7 +60,7 @@ BASE_CONFIG = {
         "weight_decay": 0.0,
         "scheduler": {"flag": False, "gamma": 0.95499},
         "num_epochs": 10,  # Grid search uses 10 epochs per combo
-        "cost_function": "normalized_mse_loss",
+        "cost_function": "normalized_mse_loss_per_component",
         "lambda_div": 0.0,
         "lambda_flow": 0.0,
         "lambda_smooth": 0.0,
@@ -113,12 +113,11 @@ GRID = {
     # Depth/Features configurations
     # depth 4: smaller network, faster training
     # depth 5: baseline (current best guess)
-    # depth 6: larger - skipped due to potential memory issues on 3D data
+    # depth 6: REMOVED - spatial dimensions collapse to 1x1 at bottleneck (64/2^6=1)
     "features": [
         [64, 128, 256, 512],           # depth 4
         [64, 128, 256, 512, 1024],     # depth 5 (baseline)
-        [64, 128, 256, 512, 1024, 2048],
-        [32, 64, 128, 256, 512, 1024]
+        [32, 64, 128, 256, 512] 
     ],
     
     # Kernel size
@@ -129,27 +128,27 @@ GRID = {
     # Attention settings
     # "3..2": attention from level 3 to max, 2 heads (baseline)
     # "": no attention (lighter, faster)
-    "attention": ["3..2", ""],
+    "attention": ["3..2"],
     
     # Learning rate
     # Center: 1e-4, explore 0.5x and 2x
-    "learning_rate": [5e-5, 1e-4, 5e-4],
+    "learning_rate": [1e-4, 5e-4, 1e-3, 5e-3],
     
     # Dropout for regularization
     "dropout": [0.0],
     
     # Time embedding dimension (kept fixed to reduce search space)
-    "time_embedding_dim": [64, 128],
+    "time_embedding_dim": [64],
 }
 
-# Fixed random seed for reproducibility
-RANDOM_SEED = 42
+# Fixed random seed for reproducibility (must match VAE training seed for consistent data split)
+RANDOM_SEED = 2024
 
 # Number of epochs per grid search run
-NUM_EPOCHS = 15
+NUM_EPOCHS = 10
 
 # Output directory for grid search results
-OUTPUT_DIR = "./trained/gridsearchmse/"
+OUTPUT_DIR = "./trained/gridsearchmse_comp/"
 
 
 # =============================================================================
