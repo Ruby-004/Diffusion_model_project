@@ -203,7 +203,8 @@ def main():
             shuffle=False, # Important for consistent indexing inside the loader
             seed=2024,     # Enforce seed 2024
             augment=False,
-            use_3d=True    # Defaulting to true as most complex case, usually inferred from logic but let's assume 3D based on project
+            use_3d=True,   # Defaulting to true as most complex case, usually inferred from logic but let's assume 3D based on project
+            num_workers=0  # Use 0 workers to avoid Windows multiprocessing issues
         )
         
         # get_loader with default k_folds=None returns [(train, val, test)]
@@ -444,21 +445,26 @@ def main():
         # Add Prediction (Slices, 3, H, W)
         pred = to_numpy(prediction)
         
-        # Normalize each component independently for better visualization
-        # Physical velocities are very small (~0.001-0.01 m/s) and x >> y,z
+        # Normalize each component using ABSOLUTE VALUE normalization
+        # This is critical for velocity data symmetric around zero
+        # Using (x - p1)/(p99 - p1) normalization causes issues when data is symmetric:
+        # - Zero maps to ~0.5 which is the default iso threshold
+        # - This causes most of the volume to appear solid!
+        # Instead, use |x| / p99(|x|) to ensure zero stays at zero
         pred_normalized = np.zeros_like(pred)
         
         print("\nVelocity ranges (physical, m/s):")
         for i, component in enumerate(['V_x', 'V_y', 'V_z'][:pred.shape[1]]):
             comp_data = pred[:, i]
-            vmin, vmax = np.percentile(comp_data, [1, 99])
-            print(f"  {component}: [{comp_data.min():.6f}, {comp_data.max():.6f}] (p1-p99: [{vmin:.6f}, {vmax:.6f}])")
+            abs_data = np.abs(comp_data)
+            abs_p99 = np.percentile(abs_data, 99)
+            print(f"  {component}: [{comp_data.min():.6f}, {comp_data.max():.6f}] (|x| p99: {abs_p99:.6f})")
             
-            # Normalize each component independently
-            if vmax > vmin:
-                pred_normalized[:, i] = (comp_data - vmin) / (vmax - vmin)
+            # Normalize using absolute value - ensures zero stays at zero
+            if abs_p99 > 0:
+                pred_normalized[:, i] = abs_data / abs_p99
             else:
-                pred_normalized[:, i] = comp_data
+                pred_normalized[:, i] = abs_data
         
         # Calculate Magnitude (use original physical values)
         pred_mag = np.sqrt(np.sum(pred**2, axis=1))
@@ -483,19 +489,22 @@ def main():
             if target_velocity.dim() == 4: target_velocity = target_velocity.unsqueeze(0)
             target = to_numpy(target_velocity)
             
-            # Normalize each component independently (same as prediction)
+            # Normalize using ABSOLUTE VALUE (same as prediction)
+            # This ensures zero-centered data maps zero to zero, not ~0.5
             target_normalized = np.zeros_like(target)
             
             print("\nTarget velocity ranges (physical, m/s):")
             for i, component in enumerate(['V_x', 'V_y', 'V_z'][:target.shape[1]]):
                 comp_data = target[:, i]
-                vmin, vmax = np.percentile(comp_data, [1, 99])
-                print(f"  {component}: [{comp_data.min():.6f}, {comp_data.max():.6f}] (p1-p99: [{vmin:.6f}, {vmax:.6f}])")
+                abs_data = np.abs(comp_data)
+                abs_p99 = np.percentile(abs_data, 99)
+                print(f"  {component}: [{comp_data.min():.6f}, {comp_data.max():.6f}] (|x| p99: {abs_p99:.6f})")
                 
-                if vmax > vmin:
-                    target_normalized[:, i] = (comp_data - vmin) / (vmax - vmin)
+                # Normalize using absolute value - ensures zero stays at zero
+                if abs_p99 > 0:
+                    target_normalized[:, i] = abs_data / abs_p99
                 else:
-                    target_normalized[:, i] = comp_data
+                    target_normalized[:, i] = abs_data
             
             target_mag = np.sqrt(np.sum(target**2, axis=1))
             mag_min, mag_max = np.percentile(target_mag, [1, 99])

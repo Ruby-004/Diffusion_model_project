@@ -6,7 +6,7 @@ import json
 
 
 import numpy as np
-from PIL import Image
+# PIL import moved to MicrographDataset to avoid libstdc++ issues on some systems
 from sklearn.model_selection import KFold
 import torch
 from torch.utils.data import (
@@ -652,6 +652,8 @@ def load_VirtualPermeabilityBenchmark(
     Args:
         folder: The folder contains (.tif) images representing microstructure cross-sections obtained through an X-ray microscope.
     """
+    from PIL import Image  # Import here to avoid libstdc++ issues on some systems
+    
     VOXEL_SIZE = 0.521 * 1e-6 # 0.521 microns/voxel
 
     img_paths = os.listdir(folder)

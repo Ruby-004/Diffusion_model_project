@@ -117,7 +117,8 @@ GRID = {
     "features": [
         [64, 128, 256, 512],           # depth 4
         [64, 128, 256, 512, 1024],     # depth 5 (baseline)
-        [32, 64, 128, 256, 512] 
+        [32, 64, 128, 256, 512],
+        [128, 256, 512, 1024, 2048]
     ],
     
     # Kernel size
@@ -132,7 +133,7 @@ GRID = {
     
     # Learning rate
     # Center: 1e-4, explore 0.5x and 2x
-    "learning_rate": [1e-4, 5e-4, 1e-3, 5e-3],
+    "learning_rate": [5e-4, 1e-3, 2e-3, 5e-3, 1e-2],
     
     # Dropout for regularization
     "dropout": [0.0],
@@ -145,7 +146,7 @@ GRID = {
 RANDOM_SEED = 2024
 
 # Number of epochs per grid search run
-NUM_EPOCHS = 10
+NUM_EPOCHS = 15
 
 # Output directory for grid search results
 OUTPUT_DIR = "./trained/gridsearchmse_comp/"
