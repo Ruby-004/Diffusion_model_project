@@ -320,15 +320,20 @@ project_root/
 **Purpose**: Learn separate latent representations for 2D and 3D velocity fields with alignment between them.
 
 **Architecture**:
-- **2D Branch**: Encoder E2D + Decoder D2D
-  - Input: 2D velocity field `(batch, 3, height, width)` where vz=0
+- **2D Branch**: The 2D branch consist of a 2-dimensional Encoder (E2D) and a 2-dimensional Decoder (D2D).  The structure of the 2D branch is as follows:
+
+
+  - Input: 2D velocity field `(batch, 3 channels [Vx, Vy, Vz], height, width)` where Vz=0
   - Output: 2D latent `(batch, latent_channels, height/4, width/4)`
 
+
 - **3D Branch**: Encoder E3D + Decoder D3D
-  - Input: 3D velocity field `(batch, 3, depth, height, width)` with non-zero vz
+  - Input: 3D velocity field `(batch, 3 channels [Vx, Vy, Vz], depth, height, width)` with non-zero Vz
   - Output: 3D latent `(batch, latent_channels, depth, height/4, width/4)`
 
-- **Key Innovation**: Cross-reconstruction loss forces E2D to learn sufficient information for D3D to predict the w-component (vertical velocity)
+  The depth, width and height represent the spatial dimensions of the measurement surface.
+
+- **Key Innovation**:  Cross-reconstruction loss forces E2D to learn sufficient information for D3D to predict the w-component (vertical velocity)
 
 **Training Process** (Two Stages):
 
@@ -342,19 +347,28 @@ project_root/
 - Cross-reconstruction loss: E2D → D3D (forces E2D to learn w-component information)
 - Combined loss: `L_rec_2d + L_rec_3d + λ_align * L_align + λ_cross * L_cross + β_kl * KL`
 
+Where: 
+-L_rec_2d is the 2D reconstruction loss. The MSE between original and reconstructed 2D velocity fields
+-L_rec_3d is the 3D reconstuction loss. The MSE between original and reconstruted 3D velocity fields
+-λ_align is the weighting parameter for the latent alignment loss
+-L_align is the latent alignment loss. The MSE between 2D AND 3D latent representation.
+-λ_cross is the weighting parameter for the cross reconstruction loss.
+-L_cross is the cross reconstruction loss. Recontruction between ground truth 3D and 3D reconstructed from 2D latent.
+-β_kl is the weighting parameter for the KL divergence
+-kl is the kullback-leibler Divergence. The sum of the 2D and 3D KL divergence.
+
 **Key Design Choices**:
 - **Asymmetric padding** in stride-2 convolutions prevents checkerboard artifacts
 - **Attention blocks** capture long-range dependencies in flow patterns
 - **Beta (KL weighting)**: Set to `1e-3` to focus on reconstruction quality over perfect posterior matching
 - **Per-component normalization**: Optional per-channel statistics (u, v, w) for better w-component learning
-- **Scale factor normalization**: Velocity divided by dataset-specific scale factor for stable gradients
-
+__
 **Training Loss** (Stage 1):
 ```
 Loss = Reconstruction Loss + β_kl * KL Divergence
 ```
 
-**Training Loss** (Stage 2):
+**Training Loss** (Stage 2): 
 ```
 Loss = L_rec_2d + L_rec_3d + λ_align * L_align + λ_cross * L_cross + β_kl * (KL_2d + KL_3d)
 ```
@@ -367,6 +381,8 @@ Loss = L_rec_2d + L_rec_3d + λ_align * L_align + λ_cross * L_cross + β_kl * (
 - **Input**: 
   - 2D microstructure slices: `(batch, num_slices, 1, H, W)` - binary domain image
   - 2D velocity field (initial guess): `(batch, num_slices, 3, H, W)` where vz=0
+
+H and W here are the height and width spatial dimensions of the slices.
   
 - **Processing Pipeline**:
   1. Encode 2D velocity slices → VAE E2D latent space (frozen encoder)
@@ -388,6 +404,7 @@ Loss = L_rec_2d + L_rec_3d + λ_align * L_align + λ_cross * L_cross + β_kl * (
 #### 3. **Physics-Informed Losses**
 
 Optional training objective to incorporate physical constraints:
+
 
 **Available physics losses**:
 - **Divergence loss** (`lambda_div`): Enforces ∇·u = 0 in fluid (mass conservation)
