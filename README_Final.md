@@ -327,7 +327,7 @@ project_root/
   - Output: 2D latent `(batch, latent_channels, height/4, width/4)`
 
 
-- **3D Branch**: Encoder E3D + Decoder D3D
+- **3D Branch**: The 3D branch consists of a 3-dimensional Encoder (E3D) + 3-dimensional decoder (D3D)
   - Input: 3D velocity field `(batch, 3 channels [Vx, Vy, Vz], depth, height, width)` with non-zero Vz
   - Output: 3D latent `(batch, latent_channels, depth, height/4, width/4)`
 
@@ -403,7 +403,7 @@ H and W here are the height and width spatial dimensions of the slices.
 
 #### 3. **Physics-Informed Losses**
 
-Optional training objective to incorporate physical constraints:
+During building of the model there has been an attempt to implement physics-informed losses to improve the performance. However, in the final model the best design was obtained without using these physics losses. Below follows a description of how the additional losses were orginally implemented: 
 
 
 **Available physics losses**:
