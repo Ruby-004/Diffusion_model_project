@@ -22,6 +22,7 @@ import json
 import time
 import csv
 import itertools
+import argparse
 from datetime import datetime
 from typing import Dict, Any, List, Tuple
 
@@ -87,8 +88,8 @@ BASE_CONFIG = {
                 "time_embedding_dim": 64
             },
             "distance_transform": True,
-            "vae_encoder_path": r"C:\Users\alexd\Documents\GitHub\Diffusion_model_project\VAE_model\trained\dual_vae_stage2_2d",
-            "vae_decoder_path": r"C:\Users\alexd\Documents\GitHub\Diffusion_model_project\VAE_model\trained\dual_vae_stage1_3d",
+            "vae_encoder_path": r"/home/rdewerker/Diffusion_model_project/VAE_model/trained/dual_vae_stage2_2d",
+            "vae_decoder_path": r"/home/rdewerker/Diffusion_model_project/VAE_model/trained/dual_vae_stage1_3d",
             "num_slices": 11
         }
     }
@@ -149,7 +150,7 @@ RANDOM_SEED = 2024
 NUM_EPOCHS = 15
 
 # Output directory for grid search results
-OUTPUT_DIR = "./trained/gridsearchmse_comp/"
+OUTPUT_DIR = "./trained/gridsearchmse_comp2/"
 
 
 # =============================================================================
@@ -580,10 +581,24 @@ def create_top10_report(results_csv: str, output_dir: str):
 # =============================================================================
 
 def main():
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description="Grid search for latent diffusion model")
+    parser.add_argument(
+        "--dataset-dir",
+        type=str,
+        default=r"C:\Users\alexd\Downloads\dataset_3d",
+        help="Path to the dataset directory"
+    )
+    args = parser.parse_args()
+    
+    # Update BASE_CONFIG with provided dataset path
+    BASE_CONFIG["dataset"]["root_dir"] = args.dataset_dir
+    
     print("=" * 80)
     print("LATENT DIFFUSION MODEL - GRID SEARCH")
     print("=" * 80)
     print(f"\nDate: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Dataset directory: {args.dataset_dir}")
     print(f"Random seed: {RANDOM_SEED}")
     print(f"Epochs per run: {NUM_EPOCHS}")
     print(f"Output directory: {OUTPUT_DIR}")

@@ -102,6 +102,65 @@ class DualBranchVAE(nn.Module):
                 conditional=False
             )
     
+    @classmethod
+    def from_directory(cls, folder, device=None, in_channels=3, latent_channels=8):
+        """
+        Load DualBranchVAE from a directory containing saved weights.
+        
+        Args:
+            folder: Directory containing vae.pt, best_model.pt, or model.pt
+            device: Device to load model on
+            in_channels: Number of input channels (default 3 for velocity)
+            latent_channels: Number of latent channels (default 8)
+        
+        Returns:
+            Loaded DualBranchVAE model
+        """
+        import json
+        
+        # Try to load log if it exists to get latent_channels
+        log_files = ['vae_log.json', 'log.json']
+        for log_file in log_files:
+            log_path = os.path.join(folder, log_file)
+            if os.path.exists(log_path):
+                try:
+                    with open(log_path, 'r') as f:
+                        log = json.load(f)
+                    if 'latent_channels' in log:
+                        latent_channels = log['latent_channels']
+                    if 'in_channels' in log:
+                        in_channels = log['in_channels']
+                    break
+                except (json.JSONDecodeError, KeyError):
+                    pass
+        
+        # Create model
+        model = cls(
+            in_channels=in_channels,
+            latent_channels=latent_channels,
+            share_encoders=False,
+            share_decoders=False
+        )
+        
+        # Find model file
+        possible_files = ['vae.pt', 'best_model.pt', 'model.pt']
+        model_path = None
+        for filename in possible_files:
+            candidate = os.path.join(folder, filename)
+            if os.path.exists(candidate):
+                model_path = candidate
+                break
+        
+        if model_path is None:
+            raise FileNotFoundError(f"No model file found in {folder}. Looked for: {', '.join(possible_files)}")
+        
+        # Load weights
+        import torch
+        model.load_state_dict(torch.load(model_path, map_location=device))
+        print(f"Loaded DualBranchVAE from {model_path}")
+        
+        return model
+
     def encode_2d(self, x: torch.Tensor) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         Encode 2D flow (w=0) to latent space.

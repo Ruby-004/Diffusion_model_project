@@ -111,8 +111,20 @@ class VariationalAutoencoder(nn.Module):
     def load_model(self, folder, device=None):
         """
         Load model parameters.
+        Tries multiple possible filenames: vae.pt, best_model.pt, model.pt
         """
-        model_path = osp.join(folder, self._model_filename)
+        # Try multiple possible filenames
+        possible_files = [self._model_filename, 'best_model.pt', 'model.pt']
+        model_path = None
+        for filename in possible_files:
+            candidate = osp.join(folder, filename)
+            if osp.exists(candidate):
+                model_path = candidate
+                break
+        
+        if model_path is None:
+            raise FileNotFoundError(f"No model file found in {folder}. Looked for: {', '.join(possible_files)}")
+        
         self.load_state_dict(torch.load(model_path, map_location=device))
     
     @classmethod

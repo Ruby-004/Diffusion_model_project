@@ -367,6 +367,9 @@ class LatentDiffusionPredictor(Predictor):
                     vae_norm_factors = decoder_log['norm_factors']
                     print(f"Loaded VAE norm_factors from decoder: {vae_norm_factors}")
         
+        # Track what type of VAE checkpoint we have
+        vae_checkpoint_type = None  # 'standard', 'dual_full', 'dual_stage1_3d', 'dual_stage2_2d'
+        
         if vae_path is not None:
             vae_log_path = osp.join(vae_path, 'vae_log.json')
             if osp.exists(vae_log_path):
@@ -382,15 +385,94 @@ class LatentDiffusionPredictor(Predictor):
                 if 'model_type' in vae_log and not vae_is_dual:
                     vae_is_dual = (vae_log['model_type'] == 'dual')
                     print(f"Loaded VAE model type: {'dual' if vae_is_dual else 'standard'}")
+            
+            # Auto-detect VAE checkpoint type from state dict keys
+            vae_model_files = ['vae.pt', 'best_model.pt', 'model.pt']
+            for model_file in vae_model_files:
+                model_path = osp.join(vae_path, model_file)
+                if osp.exists(model_path):
+                    state_dict = torch.load(model_path, map_location='cpu', weights_only=True)
+                    has_encoder_2d = any(k.startswith('encoder_2d.') for k in state_dict.keys())
+                    has_encoder_3d = any(k.startswith('encoder_3d.') for k in state_dict.keys())
+                    has_encoder = any(k.startswith('encoder.') for k in state_dict.keys())
+                    
+                    if has_encoder_2d and has_encoder_3d:
+                        vae_checkpoint_type = 'dual_full'
+                        vae_is_dual = True
+                        print(f"Auto-detected FULL Dual-Branch VAE (has encoder_2d + encoder_3d)")
+                    elif has_encoder_3d and not has_encoder_2d:
+                        vae_checkpoint_type = 'dual_stage1_3d'
+                        print(f"Auto-detected Stage 1 (3D only) checkpoint - needs separate encoder path for E2D")
+                    elif has_encoder_2d and not has_encoder_3d:
+                        vae_checkpoint_type = 'dual_stage2_2d'
+                        print(f"Auto-detected Stage 2 (2D only) checkpoint - needs separate decoder path for D3D")
+                    elif has_encoder:
+                        vae_checkpoint_type = 'standard'
+                        print(f"Auto-detected Standard VAE (encoder/decoder)")
+                    break
         
         # Store flags for use in encode/decode
         self.vae_is_dual = vae_is_dual
         self.vae_conditional = vae_conditional if not vae_is_dual else None  # Dual VAE doesn't use conditional flag
         
         # Load appropriate VAE architecture
-        if vae_is_dual:
+        if vae_is_dual or vae_checkpoint_type in ['dual_stage1_3d', 'dual_stage2_2d']:
+            # For partial checkpoints (Stage 1 or Stage 2) with only --vae-path:
+            # Use the 3D encoder for BOTH 2D encoding and 3D encoding (shared encoder approach)
+            if vae_checkpoint_type == 'dual_stage1_3d' and vae_encoder_path is None and vae_decoder_path is None:
+                print(f"\n*** Using Stage 1 (3D) VAE for both encoding and decoding ***")
+                print(f"    This uses encoder_3d for 2D input encoding (shared encoder approach)")
+                print(f"    For separate E2D/D3D, use --vae-encoder-path and --vae-decoder-path\n")
+                
+                # Load the 3D VAE and use its encoder for both 2D and 3D
+                self.vae = DualBranchVAE(
+                    in_channels=3,
+                    latent_channels=latent_channels,
+                    share_encoders=True,  # E2D = E3D (shared)
+                    share_decoders=False
+                )
+                
+                # Find model file
+                vae_model_path = None
+                for model_file in ['vae.pt', 'best_model.pt', 'model.pt']:
+                    candidate = osp.join(vae_path, model_file)
+                    if osp.exists(candidate):
+                        vae_model_path = candidate
+                        break
+                if vae_model_path is None:
+                    raise FileNotFoundError(f"No model file found in {vae_path}")
+                
+                state_dict = torch.load(vae_model_path, map_location='cpu')
+                
+                # Map encoder_3d -> encoder_2d (shared) and decoder_3d -> decoder_3d
+                # Since share_encoders=True, encoder_2d IS encoder_3d, so we only load encoder_3d
+                encoder_state = {k.replace('encoder_3d.', ''): v for k, v in state_dict.items() if k.startswith('encoder_3d.')}
+                decoder_3d_state = {k.replace('decoder_3d.', ''): v for k, v in state_dict.items() if k.startswith('decoder_3d.')}
+                
+                # Load into the shared encoder (encoder_2d = encoder_3d due to share_encoders=True)
+                self.vae.encoder_2d.load_state_dict(encoder_state)
+                self.vae.decoder_3d.load_state_dict(decoder_3d_state)
+                
+                # Also need decoder_2d for completeness (use same as decoder_3d if not available)
+                if any(k.startswith('decoder_2d.') for k in state_dict.keys()):
+                    decoder_2d_state = {k.replace('decoder_2d.', ''): v for k, v in state_dict.items() if k.startswith('decoder_2d.')}
+                else:
+                    decoder_2d_state = decoder_3d_state  # Use 3D decoder for 2D as well
+                self.vae.decoder_2d.load_state_dict(decoder_2d_state)
+                
+                print(f"Loaded VAE from {vae_model_path} (shared encoder mode)")
+                self.vae_is_dual = True
+                
+            elif vae_checkpoint_type == 'dual_stage2_2d' and vae_encoder_path is None and vae_decoder_path is None:
+                raise ValueError(
+                    f"Detected Stage 2 (2D only) checkpoint at {vae_path}. "
+                    f"This checkpoint only has encoder_2d/decoder_2d but diffusion needs decoder_3d.\n"
+                    f"Please provide the Stage 1 (3D) path:\n"
+                    f"  --vae-decoder-path <path_to_stage1_3d>  (contains encoder_3d + decoder_3d)"
+                )
+            
             # Check if separate encoder/decoder paths are provided
-            if vae_encoder_path is not None or vae_decoder_path is not None:
+            elif vae_encoder_path is not None or vae_decoder_path is not None:
                 print(f"Loading Dual-Branch VAE with separate encoder/decoder paths...")
                 
                 # Use provided paths or fall back to main vae_path
@@ -413,15 +495,25 @@ class LatentDiffusionPredictor(Predictor):
                 )
                 
                 # Load encoder weights (E2D from stage 2)
-                encoder_model_path = osp.join(encoder_path, 'best_model.pt')
-                if not osp.exists(encoder_model_path):
-                    encoder_model_path = osp.join(encoder_path, 'best_model.pt')
+                encoder_model_path = None
+                for fname in ['best_model.pt', 'vae.pt', 'model.pt']:
+                    candidate = osp.join(encoder_path, fname)
+                    if osp.exists(candidate):
+                        encoder_model_path = candidate
+                        break
+                if encoder_model_path is None:
+                    raise FileNotFoundError(f"No model file found in encoder path: {encoder_path}")
                 encoder_state = torch.load(encoder_model_path, map_location='cpu')
                 
                 # Load decoder weights (D3D from stage 1)
-                decoder_model_path = osp.join(decoder_path, 'best_model.pt')
-                if not osp.exists(decoder_model_path):
-                    decoder_model_path = osp.join(decoder_path, 'best_model.pt')
+                decoder_model_path = None
+                for fname in ['best_model.pt', 'vae.pt', 'model.pt']:
+                    candidate = osp.join(decoder_path, fname)
+                    if osp.exists(candidate):
+                        decoder_model_path = candidate
+                        break
+                if decoder_model_path is None:
+                    raise FileNotFoundError(f"No model file found in decoder path: {decoder_path}")
                 decoder_state = torch.load(decoder_model_path, map_location='cpu')
                 
                 # Extract encoder_2d weights from encoder checkpoint
@@ -469,22 +561,18 @@ class LatentDiffusionPredictor(Predictor):
                 self.vae.encoder_3d.load_state_dict(encoder_3d_state)
                 print(f"  Loaded E3D encoder from {decoder_model_path} (for target encoding)")
                 
+                # Mark as dual VAE for encode/decode methods
+                self.vae_is_dual = True
                 
             else:
-                # Load from single path (original behavior)
-                print(f"Loading Dual-Branch VAE from {vae_path}...")
-                self.vae = DualBranchVAE(
+                # Load from single path - only works for FULL dual VAE checkpoint
+                print(f"Loading FULL Dual-Branch VAE from {vae_path}...")
+                self.vae = DualBranchVAE.from_directory(
+                    vae_path,
+                    device='cpu',
                     in_channels=3,
-                    latent_channels=latent_channels,
-                    share_encoders=False,
-                    share_decoders=False
+                    latent_channels=latent_channels
                 )
-                # Load weights
-                vae_model_path = osp.join(vae_path, 'best_model.pt')
-                if not osp.exists(vae_model_path):
-                    vae_model_path = osp.join(vae_path, 'best_model.pt')
-                self.vae.load_state_dict(torch.load(vae_model_path, map_location='cpu'))
-                print(f"Loaded Dual VAE weights from {vae_model_path}")
         else:
             # Use default if not found in log (non-conditional is simpler default)
             if vae_conditional is None:
@@ -495,7 +583,7 @@ class LatentDiffusionPredictor(Predictor):
             # Use latent_channels from model_kwargs if provided (should match output channels)
             print(f"Loading Standard VAE from {vae_path}...")
             self.vae = VariationalAutoencoder.from_directory(
-                vae_path, 
+                vae_path,
                 in_channels=3,  # 3 channels: velocity (vx, vy, vz)
                 latent_channels=latent_channels,
                 conditional=vae_conditional
