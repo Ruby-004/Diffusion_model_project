@@ -1,3 +1,6 @@
+# this code is a first attempt at training a VAE on 3D flow data which underperforms significantly not being able to reconstruct the vz component well
+#It is not used on the training of the final model and only kept for reference
+
 import time
 import os
 import json

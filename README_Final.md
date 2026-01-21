@@ -23,7 +23,6 @@ This project implements a physics-informed machine learning pipeline for predict
 
 1. **Clone the repository** (if not already done):
 
-Update: Check if bash is needed
    ```bash
    git clone <repository-url>
    cd Diffusion_model_project
@@ -112,13 +111,12 @@ project_root/
 
 In this section, all the shell code provided includes the parameters values used to obtain the final model that can be downloaded as described in the pre-trained model section. These can be changed to obtain different models.
 
-#### A. Training a VAE (Prerequisite) - Two-Stage Process
+#### A. Training a VAE - Two-Stage Process
 
-Update: I don't think it is needed to actually train a whole VAE but check 
-If training a new diffusion model, you must train a Dual-Branch VAE with a two-stage process.
+For reproducibility, a random seed of 2024 was set for the training of both VAEs and a train-validation-test split of 70-15-15.
 
 **Stage 1: Train 3D VAE only**
-Update parameters and add key parameters section
+
 ```bash
 cd VAE_model
 python train_3d_vae_only.py \
@@ -133,7 +131,7 @@ python train_3d_vae_only.py \
 ```
 
 **Stage 2: Train 2D VAE with alignment and cross-reconstruction**
-Update parameters and add key parameters section
+
 ```bash
 python train_2d_with_cross.py \
   --dataset-dir ../data/rve_5k_xy \
@@ -143,7 +141,7 @@ python train_2d_with_cross.py \
   --latent-channels 8 \
   --batch-size 1 \
   --num-epochs 100 \
-  --learning-rate 5e-5 \
+  --learning-rate 1e-4 \
   --per-component-norm \
   --lambda-align 5 \
   --lambda-cross 50
@@ -155,6 +153,7 @@ python train_2d_with_cross.py \
 
 #### B. Training the Latent Diffusion Model
 Update parameters and explain gridsearch
+For reproducibility, a random seed of 42 was set for the training and a train-validation-test split of 70-15-15.
 
 ```bash
 cd Diffusion_model
@@ -162,32 +161,41 @@ python train.py \
   --root-dir ../data/rve_5k_xy \
   --vae-path ../VAE_model/trained/dual_vae_stage2 \
   --predictor-type latent-diffusion \
-  --in-channels 9 \
+  --in-channels 17 \
   --out-channels 8 \
-  --features 64 128 256 512 \
-  --batch-size 3 \
-  --num-epochs 200 \
+  --features 64 128 256 512 1024 \
+  --batch-size 2 \
+  --num-epochs 100 \
   --learning-rate 1e-4 \
-  --weight-decay 1e-4 \
+  --weight-decay 0 \
   --use-3d True \
   --num-slices 11 \
-  --lambda-div 0.01 \
-  --lambda-bc 0.1 \
-  --lambda-flow 0.001 \
-  --lambda-smooth 0.0001
+  --lambda-div 0.0 \
+  --lambda-bc 0.0 \
+  --lambda-flow 0.0 \
+  --lambda-smooth 0.0
 ```
-
-**Key parameters**:
-- `--vae-path`: Path to the stage 2 dual-branch VAE checkpoint
-- `--in-channels 9`: Microstructure (1) + velocity latent (8) + time embedding
-- `--out-channels 8`: Must match VAE latent channels (typically 4 or 8)
-- `--use-3d True`: Loads 3D velocity datasets
-- `--lambda-*`: Physics-informed loss weights (set to 0 to disable)
 
 **Output**: Saves to `trained/{timestamp}_unet_latent-diffusion_[params]/` with:
 - `model.pt`: Final trained model
 - `best_model.pt`: Best validation checkpoint
 - `log.json`: Full configuration and training history
+
+**Grid Search**:
+
+The final diffusion model hyperparameters were chosen by performing a gridsearch. The grid used is hard coded into gridsearch_diffusion.py and the model that showed the lowest validation loss was used. 
+
+To perform the hyperparameter grid search:
+
+```bash
+cd Diffusion_model
+python gridsearch_diffusion.py
+```
+
+This script runs through all combinations of hyperparameters (learning rate, batch size, physics loss weights, etc.) and saves:
+- `results.csv`: All runs with hyperparameters and validation metrics
+- `top10.csv`: Top 10 configurations ranked by validation loss
+- `summary.txt`: Best configuration details and recommendations
 
 #### C. Evaluating the Model
 
@@ -195,26 +203,12 @@ python train.py \
 
 ```bash
 cd Diffusion_model
-python evaluate.py \
-  --dataset-dir ../data/rve_5k_xy \
-  --vae-path ../VAE_model/trained/dual_vae_stage2 \
-  --diffusion-path trained/[timestamp]_unet_latent-diffusion_[params]
-```
-
-**Visualization and physics metrics**:
-
-Update Check this is actually doing what the title says
-
-```bash
-python scripts/evaluate_diffusion_vae.py \
-  --dataset-dir ../data/rve_5k_xy \
-  --vae-path ../VAE_model/trained/dual_vae_stage2 \
-  --diffusion-path trained/[timestamp]_unet_latent-diffusion_[params]
+python evaluate.py trained/[timestamp]_unet_latent-diffusion_[params]
 ```
 
 #### D. Running Inference
 
-Single-sample prediction using a trained model (index can be changed to infere a different sample):
+Single-sample prediction using a trained model (index can be changed to infer a different sample):
 
 ```bash
 python Inference/inference.py \
@@ -222,8 +216,8 @@ python Inference/inference.py \
   --vae-path VAE_model/trained/dual_vae_stage2 \
   --index 0
 ```
-Update: Is this in the right section? Shouldn't it be C
-**Output**: Saves predictions to `predictions/` directory with velocity fields and optional visualization.
+
+**Output**: Saves visualization to `velocity_field_comparison.png` in the current directory, and displays interactive 3D visualization via Napari viewer.
 
 #### E. Visualizing Training Progress
 
@@ -247,6 +241,7 @@ python scripts/plot_physics_metrics.py \
 ## Program Structure and Design
 
 ### File Structure Overview
+Update after files are removed including Jimmy's README
 
 ```
 project_root/
@@ -557,25 +552,6 @@ Optional training objective to incorporate physical constraints:
 - Quantitative metrics: MAE, RMSE, relative errors per component
 - Qualitative visualization: flow field comparisons, error maps
 - Physics metrics: divergence, flow rate consistency, boundary condition violations
-
----
-
-## Citation
-
-If you use this code in your research, please cite:
-
-```bibtex
-@software{diffusion_microflow_2025,
-  author = {Your Name},
-  title = {Latent Diffusion Model for Microstructure-Based Flow Prediction},
-  year = {2025},
-  url = {<repository-url>}
-}
-```
-
-## Contact & Support
-
-For questions, issues, or contributions, please open an issue on the repository.
 
 ---
 
