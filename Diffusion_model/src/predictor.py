@@ -307,6 +307,7 @@ class LatentDiffusionPredictor(Predictor):
         vae_encoder_path: str = None,
         vae_decoder_path: str = None,
         num_slices: int = 11,
+        num_timesteps: int = 1000,
     ) -> None:
         
         # Helper imports
@@ -323,7 +324,7 @@ class LatentDiffusionPredictor(Predictor):
         )
         
         self.num_slices = num_slices
-        self.num_timesteps = 1000
+        self.num_timesteps = num_timesteps
         
         # Init scheduler
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -819,17 +820,35 @@ class LatentDiffusionPredictor(Predictor):
         x = noise
         self.scheduler.to(device)
         
-        for t in reversed(range(0, self.num_timesteps)):
-             t_batch = torch.full((batch_size * latent_depth,), t, device=device, dtype=torch.long)
-             
-             unet_input = torch.cat([x, velocity_2d_latent_flat, feats_latent_flat], dim=1)
-             
-             # Predict noise
-             with torch.no_grad():
-                  noise_pred = self.model(unet_input, t_batch)
-             
-             # Step - use wider clip range for latent space
-             x = self.scheduler.p_sample(noise_pred, x, t, clip_denoised=True, clip_range=(-30.0, 30.0))
+        if self.num_timesteps == 1:
+            # One-step diffusion: predict noise at maximum timestep and denoise in one step
+            t = self.num_timesteps - 1  # t=0 for num_timesteps=1
+            t_batch = torch.full((batch_size * latent_depth,), t, device=device, dtype=torch.long)
+            
+            unet_input = torch.cat([x, velocity_2d_latent_flat, feats_latent_flat], dim=1)
+            
+            # Predict noise
+            with torch.no_grad():
+                noise_pred = self.model(unet_input, t_batch)
+            
+            # One-step denoising: x_0 = (x_t - sqrt(1-alpha_bar_t) * noise_pred) / sqrt(alpha_bar_t)
+            alpha_bar = self.scheduler.alpha_bar_t[t]
+            x = (x - torch.sqrt(1 - alpha_bar) * noise_pred) / torch.sqrt(alpha_bar)
+            # Clip to reasonable range in latent space
+            x = torch.clamp(x, -30.0, 30.0)
+        else:
+            # Multi-step diffusion: iterative denoising
+            for t in reversed(range(0, self.num_timesteps)):
+                 t_batch = torch.full((batch_size * latent_depth,), t, device=device, dtype=torch.long)
+                 
+                 unet_input = torch.cat([x, velocity_2d_latent_flat, feats_latent_flat], dim=1)
+                 
+                 # Predict noise
+                 with torch.no_grad():
+                      noise_pred = self.model(unet_input, t_batch)
+                 
+                 # Step - use wider clip range for latent space
+                 x = self.scheduler.p_sample(noise_pred, x, t, clip_denoised=True, clip_range=(-30.0, 30.0))
         
         predicted_latent_flat = x
         

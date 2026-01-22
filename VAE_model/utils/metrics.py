@@ -100,6 +100,71 @@ def mae_loss_per_channel(
     return loss
 
 
+def normalized_mae_loss_per_channel(
+    output: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor = None,
+    reduce: bool = True,
+    eps: float = 1e-8
+) -> torch.Tensor:
+    """
+    Normalized MAE computed per-channel for VAE training.
+    
+    This combines the benefits of:
+    1. Per-channel computation: Prevents larger u/v components from dominating
+       and ignoring the smaller w-component
+    2. Normalization: Scale-invariant loss that divides by target magnitude
+    
+    Args:
+        output: (B, C, D, H, W) or (B, C, H, W) predicted velocity
+        target: Same shape as output - target velocity
+        mask: (B, 1, D, H, W) or (B, 1, H, W) fluid mask (optional)
+        reduce: Whether to average over batch
+        eps: Small epsilon to prevent division by zero
+        
+    Returns:
+        Scalar loss if reduce=True, else (B,) tensor
+    """
+    if mask is not None:
+        # Apply mask to both
+        mask_expanded = mask.expand_as(output)
+        output = output * mask_expanded
+        target = target * mask_expanded
+    
+    # Determine spatial dimensions based on tensor rank
+    if output.dim() == 5:
+        # 3D: (B, C, D, H, W)
+        spatial_dims = (-3, -2, -1)
+    elif output.dim() == 4:
+        # 2D: (B, C, H, W)
+        spatial_dims = (-2, -1)
+    else:
+        raise ValueError(f"Expected 4D or 5D tensor, got {output.dim()}D")
+    
+    # Compute MAE per channel: (B, C)
+    mae_per_channel = torch.mean(
+        torch.abs(output - target),
+        dim=spatial_dims
+    )
+    
+    # Compute normalization weight per channel: (B, C)
+    weight_per_channel = torch.mean(
+        torch.abs(target),
+        dim=spatial_dims
+    )
+    
+    # Normalized MAE per channel: (B, C)
+    normalized_mae = mae_per_channel / (weight_per_channel + eps)
+    
+    # Average over channels: (B,)
+    loss = torch.mean(normalized_mae, dim=-1)
+    
+    if reduce:
+        loss = loss.mean()
+    
+    return loss
+
+
 def kl_divergence(
     mu: torch.Tensor,
     *,

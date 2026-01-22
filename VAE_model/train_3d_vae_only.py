@@ -17,7 +17,7 @@ import torch.optim as optim
 
 from src.vae.autoencoder import VariationalAutoencoder
 from utils.dataset import get_loader, MicroFlowDatasetVAE
-from utils.metrics import normalized_mae_loss, kl_divergence, mae_loss_per_channel
+from utils.metrics import normalized_mae_loss, kl_divergence, mae_loss_per_channel, normalized_mae_loss_per_channel
 from torch.utils.data import DataLoader, Subset
 
 # Force unbuffered output to see prints before crashes
@@ -38,6 +38,7 @@ def parse_args():
     parser.add_argument('--per-component-norm', action='store_true', help='Use per-component normalization')
     parser.add_argument('--conditional', action='store_true', help='Use conditional VAE')
     parser.add_argument('--augment', action='store_true', help='Use data augmentation')
+    parser.add_argument('--normalized-mae-per-channel', action='store_true', help='Use normalized MAE per channel (scale-invariant)')
     
     args = parser.parse_args()
     if args.device is None:
@@ -248,6 +249,7 @@ def main():
         'per_component_norm': use_per_component,
         'norm_factors': norm_factors.tolist(),  # [max_u, max_v, max_w] for decoding
         'conditional': use_conditional,  # Whether VAE uses conditioning
+        'normalized_mae_per_channel': args.normalized_mae_per_channel,  # Scale-invariant per-channel loss
     }
     
     best_val_loss = float('inf')  # Track best validation loss for saving best model
@@ -322,7 +324,10 @@ def main():
 
             # Per-channel loss: computes MAE separately for u, v, w then averages
             # This prevents larger u/v components from dominating, ensuring w-component is learned
-            reconstruction_loss = mae_loss_per_channel(preds, targets, mask=mask)
+            if args.normalized_mae_per_channel:
+                reconstruction_loss = normalized_mae_loss_per_channel(preds, targets, mask=mask)
+            else:
+                reconstruction_loss = mae_loss_per_channel(preds, targets, mask=mask)
             kl_loss = kl_divergence(mu=mean, logvar=logvar)
             loss = (reconstruction_loss + kl_coeff * kl_loss) / gradient_accumulation_steps
             
@@ -419,7 +424,10 @@ def main():
                 targets = targets * mask
                 
                 # Per-channel loss: computes MAE separately for u, v, w then averages
-                reconstruction_loss = mae_loss_per_channel(preds, targets, mask=mask)
+                if args.normalized_mae_per_channel:
+                    reconstruction_loss = normalized_mae_loss_per_channel(preds, targets, mask=mask)
+                else:
+                    reconstruction_loss = mae_loss_per_channel(preds, targets, mask=mask)
                 kl_loss = kl_divergence(mu=mean, logvar=logvar)
                 loss = reconstruction_loss + kl_coeff * kl_loss
                 
@@ -508,7 +516,10 @@ def main():
             targets = targets * mask
             
             # Per-channel loss: computes MAE separately for u, v, w then averages
-            reconstruction_loss = mae_loss_per_channel(preds, targets, mask=mask)
+            if args.normalized_mae_per_channel:
+                reconstruction_loss = normalized_mae_loss_per_channel(preds, targets, mask=mask)
+            else:
+                reconstruction_loss = mae_loss_per_channel(preds, targets, mask=mask)
             kl_loss = kl_divergence(mu=mean, logvar=logvar)
             
             num_2d = is_2d.sum().item()

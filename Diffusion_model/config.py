@@ -321,6 +321,12 @@ group_train.add_argument(
     default=False,
     help='Whether to use 3D velocity data from dataset.'
 )
+group_train.add_argument(
+    '--num-timesteps',
+    type=int,
+    default=1000,
+    help='Number of diffusion timesteps. Set to 1 for direct one-step prediction (no iterative denoising).'
+)
 
 
 """Optimization Parameters"""
@@ -442,7 +448,8 @@ def process_args(args: argparse.Namespace):
                 'vae_path': args.vae_path,
                 'vae_encoder_path': args.vae_encoder_path,
                 'vae_decoder_path': args.vae_decoder_path,
-                'num_slices': args.num_slices
+                'num_slices': args.num_slices,
+                'num_timesteps': args.num_timesteps
             }
         },
         'optimization': {

@@ -150,9 +150,13 @@ def detect_model_type(vae_path: str) -> str:
     state_dict = torch.load(model_path, map_location='cpu', weights_only=True)
     keys = list(state_dict.keys())
     
-    # Check for dual VAE stage 2 keys (encoder_2d, decoder_2d, encoder_3d, decoder_3d)
-    if any(k.startswith('encoder_2d.') for k in keys):
+    # Check for dual VAE stage 2 keys (encoder_2d, decoder_2d, encoder_3d, decoder_3d all present)
+    if any(k.startswith('encoder_2d.') for k in keys) and any(k.startswith('encoder_3d.') for k in keys):
         return 'dual_stage2'
+    
+    # Check for 3D-only model (encoder_3d/decoder_3d but no encoder_2d) - this is dual_stage1
+    if any(k.startswith('encoder_3d.') for k in keys) and not any(k.startswith('encoder_2d.') for k in keys):
+        return 'dual_stage1_3d_only'
     
     # Check for standard/stage1 keys (encoder., decoder.)
     if any(k.startswith('encoder.') for k in keys):
@@ -231,6 +235,36 @@ def load_vae(vae_path: str, device: str, model_type: str = None) -> tuple:
                 vae.load_state_dict(state_dict)
                 print(f"  Loaded weights from: {f}")
                 break
+    elif model_type == 'dual_stage1_3d_only':
+        # Stage 1 3D model saved with encoder_3d/decoder_3d prefixes
+        # Need to remap keys to standard encoder/decoder format
+        vae = VariationalAutoencoder(
+            in_channels=in_channels,
+            latent_channels=latent_channels,
+            conditional=conditional
+        )
+        
+        model_files = ['vae.pt', 'best_model.pt', 'model.pt']
+        for f in model_files:
+            model_path = os.path.join(vae_path, f)
+            if os.path.exists(model_path):
+                state_dict = torch.load(model_path, map_location=device, weights_only=True)
+                
+                # Remap encoder_3d -> encoder and decoder_3d -> decoder
+                print(f"  Remapping encoder_3d/decoder_3d keys to standard format...")
+                new_state_dict = {}
+                for k, v in state_dict.items():
+                    if k.startswith('encoder_3d.'):
+                        new_key = k.replace('encoder_3d.', 'encoder.', 1)
+                    elif k.startswith('decoder_3d.'):
+                        new_key = k.replace('decoder_3d.', 'decoder.', 1)
+                    else:
+                        new_key = k
+                    new_state_dict[new_key] = v
+                
+                vae.load_state_dict(new_state_dict)
+                print(f"  Loaded weights from: {f}")
+                break
     elif model_type == 'dual_stage2':
         # Stage 2: Full DualBranchVAE
         vae = DualBranchVAE(
@@ -239,22 +273,14 @@ def load_vae(vae_path: str, device: str, model_type: str = None) -> tuple:
             share_encoders=False,
             share_decoders=False
         )
-        # Load weights
+        # Load weights - DualBranchVAE uses named layer format directly
         model_files = ['model.pt', 'best_model.pt', 'vae.pt']
         for f in model_files:
             model_path = os.path.join(vae_path, f)
             if os.path.exists(model_path):
                 state_dict = torch.load(model_path, map_location=device, weights_only=True)
-                
-                # Apply key mapping if checkpoint uses named-layer format
-                if _needs_key_mapping(state_dict):
-                    print(f"  Applying key mapping for DualBranchVAE checkpoint format...")
-                    # Map all 4 branches
-                    state_dict = _map_encoder_keys(state_dict, prefix='encoder_2d.')
-                    state_dict = _map_decoder_keys(state_dict, prefix='decoder_2d.')
-                    state_dict = _map_encoder_keys(state_dict, prefix='encoder_3d.')
-                    state_dict = _map_decoder_keys(state_dict, prefix='decoder_3d.')
-                
+                # DualBranchVAE already expects named-layer format (conv_in, res1_1, etc.)
+                # No key mapping needed
                 vae.load_state_dict(state_dict)
                 print(f"  Loaded weights from: {f}")
                 break
@@ -392,22 +418,38 @@ def visualize_reconstruction_comparison(
     fig, axes = plt.subplots(3, 3, figsize=figsize)
     
     for i, name in enumerate(component_names):
+        # Compute shared vmin/vmax for original and reconstructed
+        orig_data = orig_slice[i]
+        recon_data = recon_slice[i]
+        if mask_slice is not None:
+            orig_masked = np.ma.masked_where(mask_slice == 0, orig_data)
+            recon_masked = np.ma.masked_where(mask_slice == 0, recon_data)
+            vmin = min(orig_masked.min(), recon_masked.min())
+            vmax = max(orig_masked.max(), recon_masked.max())
+        else:
+            vmin = min(orig_data.min(), recon_data.min())
+            vmax = max(orig_data.max(), recon_data.max())
+        
+        # Make symmetric around zero for coolwarm colormap
+        vabs = max(abs(vmin), abs(vmax))
+        vmin, vmax = -vabs, vabs
+        
         # Original
         ax = axes[0, i]
-        data = orig_slice[i]
+        data = orig_data
         if mask_slice is not None:
             data = np.ma.masked_where(mask_slice == 0, data)
-        im = ax.imshow(data, cmap='coolwarm', origin='lower')
+        im = ax.imshow(data, cmap='coolwarm', origin='lower', vmin=vmin, vmax=vmax)
         ax.set_title(f"Original {name}")
         ax.axis('off')
         plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
         
         # Reconstructed
         ax = axes[1, i]
-        data = recon_slice[i]
+        data = recon_data
         if mask_slice is not None:
             data = np.ma.masked_where(mask_slice == 0, data)
-        im = ax.imshow(data, cmap='coolwarm', origin='lower')
+        im = ax.imshow(data, cmap='coolwarm', origin='lower', vmin=vmin, vmax=vmax)
         ax.set_title(f"Reconstructed {name}")
         ax.axis('off')
         plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
@@ -494,7 +536,7 @@ def encode_decode(vae, velocity_normalized, model_type: str, mode: str, is_3d: t
             latent, (mean, logvar) = vae.encode(velocity_normalized, condition=is_3d)
             reconstructed = vae.decode(latent, condition=is_3d)
         
-        elif model_type == 'dual_stage1':
+        elif model_type in ['dual_stage1', 'dual_stage1_3d_only']:
             # Stage 1 is a standard VAE trained on 3D data
             latent, (mean, logvar) = vae.encode(velocity_normalized, condition=None)
             reconstructed = vae.decode(latent, condition=None)
@@ -536,7 +578,7 @@ def main():
     parser.add_argument('--mode', type=str, default='auto', choices=['auto', '2d', '3d', 'cross'],
                         help='Mode for dual VAE: 2d (E2D->D2D), 3d (E3D->D3D), cross (E2D->D3D)')
     parser.add_argument('--model-type', type=str, default=None, 
-                        choices=['standard', 'dual_stage1', 'dual_stage2'],
+                        choices=['standard', 'dual_stage1', 'dual_stage1_3d_only', 'dual_stage2'],
                         help='Override model type detection')
     
     args = parser.parse_args()
@@ -565,7 +607,7 @@ def main():
     # Determine mode
     mode = args.mode
     if mode == 'auto':
-        if model_type == 'dual_stage1':
+        if model_type in ['dual_stage1', 'dual_stage1_3d_only']:
             mode = '3d'
         elif model_type == 'dual_stage2':
             mode = '2d'  # Default to 2D branch for stage 2
@@ -766,6 +808,16 @@ def main():
     n_depths = min(velocity_np.shape[1], 6)
     depth_indices = np.linspace(0, velocity_np.shape[1] - 1, n_depths, dtype=int)
     
+    # Compute global vmin/vmax for w component across all depth slices
+    all_orig_w = velocity_np[2]  # (D, H, W)
+    all_recon_w = reconstructed_np[2]
+    all_orig_w_masked = np.ma.masked_where(mask_np == 0, all_orig_w)
+    all_recon_w_masked = np.ma.masked_where(mask_np == 0, all_recon_w)
+    w_vmin = min(all_orig_w_masked.min(), all_recon_w_masked.min())
+    w_vmax = max(all_orig_w_masked.max(), all_recon_w_masked.max())
+    w_vabs = max(abs(w_vmin), abs(w_vmax))
+    w_vmin, w_vmax = -w_vabs, w_vabs
+    
     fig_w, axes = plt.subplots(2, n_depths, figsize=(3*n_depths, 6))
     for i, d in enumerate(depth_indices):
         # Original w
@@ -773,7 +825,7 @@ def main():
         mask_d = mask_np[d]
         orig_w_masked = np.ma.masked_where(mask_d == 0, orig_w)
         
-        im = axes[0, i].imshow(orig_w_masked, cmap='coolwarm', origin='lower')
+        im = axes[0, i].imshow(orig_w_masked, cmap='coolwarm', origin='lower', vmin=w_vmin, vmax=w_vmax)
         axes[0, i].set_title(f"Input w (d={d})")
         axes[0, i].axis('off')
         plt.colorbar(im, ax=axes[0, i], fraction=0.046)
@@ -782,7 +834,7 @@ def main():
         recon_w = reconstructed_np[2, d]
         recon_w_masked = np.ma.masked_where(mask_d == 0, recon_w)
         
-        im = axes[1, i].imshow(recon_w_masked, cmap='coolwarm', origin='lower')
+        im = axes[1, i].imshow(recon_w_masked, cmap='coolwarm', origin='lower', vmin=w_vmin, vmax=w_vmax)
         axes[1, i].set_title(f"Recon w (d={d})")
         axes[1, i].axis('off')
         plt.colorbar(im, ax=axes[1, i], fraction=0.046)
