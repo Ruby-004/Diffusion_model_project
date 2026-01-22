@@ -7,7 +7,9 @@ for the latent diffusion model, running each combination for a fixed number of e
 and recording validation performance.
 
 Usage:
-    python gridsearch_diffusion.py
+    python gridsearch_diffusion.py --root-dir path/to/dataset_3d \
+        --vae-encoder-path path/to/dual_vae_stage2_2d \
+        --vae-decoder-path path/to/dual_vae_stage1_3d
 
 Output:
     - results.csv: All runs with hyperparameters and metrics
@@ -40,75 +42,66 @@ from src.predictor import LatentDiffusionPredictor
 # CONFIGURATION: GRID SEARCH PARAMETERS
 # =============================================================================
 
-# Base configuration (center point)
-BASE_CONFIG = {
-    "name": "gridsearch",
-    "mode": "train",
-    "save_dir": "./trained/gridsearch_per_component/",
-    
-    "dataset": {
-        "root_dir": r"C:\Users\alexd\Downloads\dataset_3d",
-        "batch_size": 3,
-        "augment": False,
-        "shuffle": False,
-        "k_folds": 5,
-        "use_3d": True
-    },
-    
-    "training": {
-        "device": "cuda",
-        "learning_rate": 1e-4,
-        "weight_decay": 0.0,
-        "scheduler": {"flag": False, "gamma": 0.95499},
-        "num_epochs": 10,  # Grid search uses 10 epochs per combo
-        "cost_function": "normalized_mse_loss_per_component",
-        "lambda_div": 0.0,
-        "lambda_flow": 0.0,
-        "lambda_smooth": 0.0,
-        "lambda_laplacian": 0.0,
-        "physics_loss_freq": 0,
-        "lambda_velocity": 0.0,
-        "weight_u": 1.0,
-        "weight_v": 1.0,
-        "weight_w": 1.0,
-        "velocity_loss_primary": False,
-        "predictor_type": "latent-diffusion",
+def get_base_config(root_dir: str, vae_encoder_path: str, vae_decoder_path: str) -> Dict[str, Any]:
+    """Generate base configuration with provided paths."""
+    return {
+        "name": "gridsearch",
+        "mode": "train",
+        "save_dir": "./trained/gridsearch_per_component/",
         
-        "predictor": {
-            "model_name": "UNet",
-            "model_kwargs": {
-                "in_channels": 17,
-                "out_channels": 8,
-                "features": [64, 128, 256, 512, 1024],  # depth 5 (baseline)
-                "kernel_size": 3,
-                "padding_mode": "zeros",
-                "activation": "silu",
-                "attention": "3..2",
-                "dropout": 0.0,
-                "time_embedding_dim": 64
-            },
-            "distance_transform": True,
-            "vae_encoder_path": r"/home/rdewerker/Diffusion_model_project/VAE_model/trained/dual_vae_stage2_2d",
-            "vae_decoder_path": r"/home/rdewerker/Diffusion_model_project/VAE_model/trained/dual_vae_stage1_3d",
-            "num_slices": 11
+        "dataset": {
+            "root_dir": root_dir,
+            "batch_size": 3,
+            "augment": False,
+            "shuffle": False,
+            "k_folds": 5,
+            "use_3d": True
+        },
+        
+        "training": {
+            "device": "cuda",
+            "learning_rate": 1e-4,
+            "weight_decay": 0.0,
+            "scheduler": {"flag": False, "gamma": 0.95499},
+            "num_epochs": 10,  # Grid search uses 10 epochs per combo
+            "cost_function": "normalized_mse_loss_per_component",
+            "lambda_div": 0.0,
+            "lambda_flow": 0.0,
+            "lambda_smooth": 0.0,
+            "lambda_laplacian": 0.0,
+            "physics_loss_freq": 0,
+            "lambda_velocity": 0.0,
+            "weight_u": 1.0,
+            "weight_v": 1.0,
+            "weight_w": 1.0,
+            "velocity_loss_primary": False,
+            "predictor_type": "latent-diffusion",
+            
+            "predictor": {
+                "model_name": "UNet",
+                "model_kwargs": {
+                    "in_channels": 17,
+                    "out_channels": 8,
+                    "features": [64, 128, 256, 512, 1024],  # depth 5 (baseline)
+                    "kernel_size": 3,
+                    "padding_mode": "zeros",
+                    "activation": "silu",
+                    "attention": "3..2",
+                    "dropout": 0.0,
+                    "time_embedding_dim": 64
+                },
+                "distance_transform": True,
+                "vae_encoder_path": vae_encoder_path,
+                "vae_decoder_path": vae_decoder_path,
+                "num_slices": 11
+            }
         }
     }
-}
+
 
 # =============================================================================
 # GRID SEARCH SPACE
 # =============================================================================
-# Total combos target: <= 55 (hard cap 60)
-# 
-# Selected ranges:
-# - depth: {4, 5} = 2 values  (skip depth 6 due to memory concerns)
-# - kernel_size: {3, 5} = 2 values
-# - attention: {"3..2", "2..1"} = 2 values  
-# - learning_rate: {5e-5, 1e-4, 2e-4} = 3 values
-# - dropout: {0.0, 0.05} = 2 values
-# - time_embedding_dim: {64} = 1 value (keep fixed to reduce combos)
-#
-# Total: 2 * 2 * 2 * 3 * 2 * 1 = 48 combinations (under 55 cap)
 
 GRID = {
     # Depth/Features configurations
@@ -174,10 +167,10 @@ def generate_run_name(params: Dict[str, Any]) -> str:
     return name
 
 
-def make_config(params: Dict[str, Any]) -> Dict[str, Any]:
+def make_config(params: Dict[str, Any], base_config: Dict[str, Any]) -> Dict[str, Any]:
     """Create a full config dict from grid search parameters."""
     import copy
-    config = copy.deepcopy(BASE_CONFIG)
+    config = copy.deepcopy(base_config)
     
     # Update model kwargs
     model_kwargs = config["training"]["predictor"]["model_kwargs"]
@@ -562,8 +555,9 @@ def create_top10_report(results_csv: str, output_dir: str):
             "dropout": float(best_row["dropout"]),
             "time_embedding_dim": int(best_row["time_embedding_dim"])
         }
-        winning_config = make_config(winning_params)
-        f.write(json.dumps(winning_config, indent=2))
+        # Note: base_config is not available here, but we can still write params
+        f.write("Winning hyperparameters:\n")
+        f.write(json.dumps(winning_params, indent=2))
         f.write("\n")
     
     print(f"Summary saved to: {summary_path}")
@@ -582,23 +576,68 @@ def create_top10_report(results_csv: str, output_dir: str):
 
 def main():
     # Parse command-line arguments
-    parser = argparse.ArgumentParser(description="Grid search for latent diffusion model")
+    parser = argparse.ArgumentParser(
+        description="Grid search for latent diffusion model hyperparameter tuning",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Example:
+    python gridsearch_diffusion.py \\
+        --root-dir ../data/dataset_3d \\
+        --vae-encoder-path ../VAE_model/trained/dual_vae_stage2_2d \\
+        --vae-decoder-path ../VAE_model/trained/dual_vae_stage1_3d
+        """
+    )
     parser.add_argument(
-        "--dataset-dir",
+        "--root-dir",
         type=str,
-        default=r"C:\Users\alexd\Downloads\dataset_3d",
-        help="Path to the dataset directory"
+        required=True,
+        help="Path to the dataset directory containing domain.pt, U_2d.pt, U.pt, etc."
+    )
+    parser.add_argument(
+        "--vae-encoder-path",
+        type=str,
+        required=True,
+        help="Path to the 2D VAE encoder checkpoint (stage 2: dual_vae_stage2_2d)"
+    )
+    parser.add_argument(
+        "--vae-decoder-path",
+        type=str,
+        required=True,
+        help="Path to the 3D VAE decoder checkpoint (stage 1: dual_vae_stage1_3d)"
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="./trained/gridsearch/",
+        help="Output directory for grid search results (default: ./trained/gridsearch/)"
+    )
+    parser.add_argument(
+        "--num-epochs",
+        type=int,
+        default=15,
+        help="Number of epochs per grid search run (default: 15)"
     )
     args = parser.parse_args()
     
-    # Update BASE_CONFIG with provided dataset path
-    BASE_CONFIG["dataset"]["root_dir"] = args.dataset_dir
+    # Update global variables with command-line arguments
+    global OUTPUT_DIR, NUM_EPOCHS
+    OUTPUT_DIR = args.output_dir
+    NUM_EPOCHS = args.num_epochs
+    
+    # Create base config with provided paths
+    BASE_CONFIG = get_base_config(
+        root_dir=args.root_dir,
+        vae_encoder_path=args.vae_encoder_path,
+        vae_decoder_path=args.vae_decoder_path
+    )
     
     print("=" * 80)
     print("LATENT DIFFUSION MODEL - GRID SEARCH")
     print("=" * 80)
     print(f"\nDate: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"Dataset directory: {args.dataset_dir}")
+    print(f"Dataset directory: {args.root_dir}")
+    print(f"VAE encoder: {args.vae_encoder_path}")
+    print(f"VAE decoder: {args.vae_decoder_path}")
     print(f"Random seed: {RANDOM_SEED}")
     print(f"Epochs per run: {NUM_EPOCHS}")
     print(f"Output directory: {OUTPUT_DIR}")
@@ -676,8 +715,8 @@ def main():
             print("  SKIPPED (already completed)")
             continue
         
-        # Make config
-        config = make_config(params)
+        # Make config with BASE_CONFIG
+        config = make_config(params, BASE_CONFIG)
         config["training"]["num_epochs"] = NUM_EPOCHS
         
         # Log hyperparameters

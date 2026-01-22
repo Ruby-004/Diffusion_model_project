@@ -4,54 +4,62 @@ This project implements a physics-informed machine learning pipeline for predict
 
 ## Table of Contents
 
-1. [Steps to Reproduce Results](#steps-to-reproduce-results)
-2. [Program Structure and Design](#program-structure-and-design)
-3. [Key Features](#key-features)
+1. [Quick Start](#quick-start)
+2. [Steps to Reproduce Results](#steps-to-reproduce-results)
+3. [Program Structure and Design](#program-structure-and-design)
+4. [Key Features](#key-features)
 
 ---
+
+## Quick Start
+
+### Prerequisites
+- **Python 3.11** (tested)
+- **CUDA 12.6+** for GPU acceleration (optional but highly recommended for training)
+- Git
+
+### Installation (5 minutes)
+
+```bash
+# Clone repository
+git clone <repository-url>
+cd Diffusion_model_project
+
+# Create virtual environment with Python 3.11
+py -3.11 -m venv venv
+
+# Activate (Windows)
+venv\Scripts\activate
+# Activate (Linux/macOS)
+# source venv/bin/activate
+
+# Install PyTorch with CUDA (GPU - recommended for training)
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+
+# For newer GPUs (RTX 40xx/50xx with CUDA 12.8):
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+
+# Install remaining dependencies
+pip install -r requirements.txt
+
+# Verify installation
+python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA: {torch.cuda.is_available()}')"
+```
 
 ## Steps to Reproduce Results
 
 ### 1. Environment Setup
 
 #### Prerequisites
-- Python 3.8+
-- CUDA 11.8+ (for GPU acceleration, recommended)
+- **Python 3.11** (required)
+- **CUDA 12.6+** (for GPU acceleration, recommended)
 - Git
 
 #### Installation Steps
 
-1. **Clone the repository** (if not already done):
-
-   ```bash
-   git clone <repository-url>
-   cd Diffusion_model_project
-   ```
-
-2. **Create a virtual environment** (recommended):
-   ```bash
-   python -m venv venv
-   
-   # Activate on Windows
-   venv\Scripts\activate
-   
-   # Activate on Linux/macOS
-   source venv/bin/activate
-   ```
-
-3. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Verify installation**:
-   ```bash
-   python -c "import torch; print(f'PyTorch version: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
-   ```
+### 1. Clone the repository and activate env (if not already done):
 
 ### 2. Downloading Pre-trained Models
-
-Update
 
 The project uses pre-trained models hosted on Zenodo. Models are automatically downloaded and cached when needed.
 
@@ -140,7 +148,7 @@ python train_3d_vae_only.py `
 python train_2d_with_cross.py `
   --dataset-dir ../path/to/dataset_3d `
   --save-dir trained/dual_vae_stage2_2d `
-  --stage1-checkpoint trained/dual_vae_stage1_3d
+  --stage1-checkpoint trained/dual_vae_stage1_3d `
   --in-channels 3 `
   --latent-channels 8 `
   --batch-size 1 `
@@ -163,8 +171,8 @@ For reproducibility, a random seed of 42 was set for the training and a train-va
 cd Diffusion_model
 python train.py `
   --root-dir ../path/to/dataset_3d `
-  --vae-encoder-path ../trained/dual_vae_stage1_3d `
-  --vae-decoder-path ../trained/dual_vae_stage1_3d `
+  --vae-encoder-path ../VAE_model/trained/dual_vae_stage2_2d `
+  --vae-decoder-path ../VAE_model/trained/dual_vae_stage1_3d `
   --predictor-type latent-diffusion `
   --in-channels 17 `
   --out-channels 8 `
@@ -210,7 +218,12 @@ To perform the hyperparameter grid search:
 
 ```bash
 cd Diffusion_model
-python gridsearch_diffusion.py
+python gridsearch_diffusion.py `
+  --root-dir ../path/to/dataset_3d `
+  --vae-encoder-path ../VAE_model/trained/dual_vae_stage2_2d `
+  --vae-decoder-path ../VAE_model/trained/dual_vae_stage1_3d `
+  --output-dir ./trained/gridsearch/ `
+  --num-epochs 15
 ```
 
 **Output**:
@@ -219,6 +232,8 @@ python gridsearch_diffusion.py
 - `summary.txt`: Best configuration details and recommendations
 
 The best configuration is automatically saved to `trained/gridsearch_per_component/` subdirectories.
+
+For our grid the best combination was: `[64, 128, 256, 512, 1024]` (depth 5) and a learning rate of `1e-3`.
 
 #### D. Evaluating the Model
 
@@ -266,9 +281,10 @@ python scripts/eval_testset_end2end.py `
 Single-sample prediction using a trained model (index can be changed to infer a different sample):
 
 ```bash
-python Inference/inference.py \
-  Diffusion_model/trained/[timestamp]_unet_latent-diffusion_[params] \
-  --vae-path VAE_model/trained/dual_vae_stage2_2d \
+python Inference/inference.py `
+  Diffusion_model/trained/[timestamp]_unet_latent-diffusion_[params] `
+  --vae-encoder-path VAE_model/trained/dual_vae_stage2_2d `
+  --vae-decoder-path VAE_model/trained/dual_vae_stage1_3d `
   --index 0
 ```
 
@@ -298,14 +314,14 @@ This reconstructs both 2D and 3D velocity fields from a test sample and displays
 ```bash
 cd Diffusion_model
 python scripts/plot_loss.py `
-  trained/[timestamp]_unet_latent-diffusion_[params]/log.json
+  trained/[timestamp]_unet_latent-diffusion_[params]
 ```
 
 **Plot physics metrics** (divergence, flow rate consistency, etc.):
 
 ```bash
 python scripts/plot_physics_metrics.py `
-  trained/[timestamp]_unet_latent-diffusion_[params]/log.json
+  trained/[timestamp]_unet_latent-diffusion_[params]
 ```
 
 **Plot VAE training loss:**
@@ -313,11 +329,11 @@ python scripts/plot_physics_metrics.py `
 ```bash
 cd VAE_model
 python plot_vae_loss.py `
-  trained/dual_vae_stage1_3d/log.json
+  trained/dual_vae_stage1_3d
 
 # For stage 2 dual VAE
 python plot_vae_loss.py `
-  trained/dual_vae_stage2_2d/log.json
+  trained/dual_vae_stage2_2d
 ```
 
 **Output**: Generates loss curves showing training and validation metrics over epochs, including reconstruction loss, KL divergence, and (for stage 2) alignment and cross-reconstruction losses.
@@ -529,7 +545,6 @@ During building of the model there has been an attempt to implement physics-info
 - Reduced KL weight from 1e-0 to 1e-3 (prioritizing reconstruction)
 - Applied scale factor normalization for stable gradients
 - Used normalized MAE loss (divides by target magnitude) for scale-invariant training
-- Documented in [W_COMPONENT_FIX.md](Diffusion_model/docs/W_COMPONENT_FIX.md)
 - Additional diagnostics in `scripts/diagnose_w_component.py`
 
 #### 2. **Physics Loss Integration**
@@ -540,7 +555,6 @@ During building of the model there has been an attempt to implement physics-info
 - Computed physics losses on decoded fields (not latents) for consistency
 - Tuned loss weights carefully (recommended starting: `--lambda-div 0.01 --lambda-bc 0.1`)
 - Used detached metrics for logging to avoid gradient contamination
-- Documented tuning guide in [PHYSICS_INFORMED_TRAINING.md](Diffusion_model/docs/PHYSICS_INFORMED_TRAINING.md)
 
 #### 3. **Dataset Consistency**
 

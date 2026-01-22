@@ -231,7 +231,18 @@ def main():
     
     # Load stage 1 checkpoint (encoder_3d + decoder_3d) into E3D + D3D
     print(f"\nLoading stage 1 checkpoint: {args.stage1_checkpoint}")
-    checkpoint = torch.load(args.stage1_checkpoint, map_location=device)
+    
+    # Handle both file and directory paths
+    if os.path.isdir(args.stage1_checkpoint):
+        # Try best_model.pt first, then vae.pt
+        checkpoint_file = os.path.join(args.stage1_checkpoint, 'best_model.pt')
+        if not os.path.exists(checkpoint_file):
+            checkpoint_file = os.path.join(args.stage1_checkpoint, 'vae.pt')
+        print(f"  Loading from: {checkpoint_file}")
+    else:
+        checkpoint_file = args.stage1_checkpoint
+    
+    checkpoint = torch.load(checkpoint_file, map_location=device)
     
     # Stage 1 now saves with encoder_3d/decoder_3d naming - no remapping needed!
     missing, unexpected = model.load_state_dict(checkpoint, strict=False)

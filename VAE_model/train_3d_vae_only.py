@@ -82,24 +82,21 @@ def main():
     print(f"\nLoading dataset from: {args.dataset_dir}")
     full_dataset = MicroFlowDatasetVAE(root_dir=args.dataset_dir, augment=args.augment)
     
-    # # Filter to keep only 3D samples (is_2d=False)
-    # print("Filtering for 3D samples only...")
-    # indices_3d = []
-    # for i in range(len(full_dataset)):
-    #     sample = full_dataset[i]
-    #     if not sample['is_2d']:
-    #         indices_3d.append(i)
+    # Filter to keep only 3D samples (is_2d=False)
+    print("Filtering for 3D samples only...")
+    indices_3d = []
+    for i in range(len(full_dataset)):
+        sample = full_dataset[i]
+        if not sample['is_2d']:
+            indices_3d.append(i)
     
-    # print(f"Total samples: {len(full_dataset)}, 3D samples: {len(indices_3d)}")
+    print(f"Total samples: {len(full_dataset)}, 3D samples: {len(indices_3d)}")
     
-    # # Create subset with only 3D samples
-    # dataset_3d = Subset(full_dataset, indices_3d)
+    # Create subset with only 3D samples
+    dataset_3d = Subset(full_dataset, indices_3d)
     
-    # 70/15/15 split
-    # Use ALL samples (both 2D and 3D)
-    print(f"Using all samples: 2D and 3D combined")
-    dataset_3d = full_dataset  # Rename kept for compatibility
-    num_samples = len(full_dataset)
+    # 70/15/15 split on 3D samples only
+    num_samples = len(indices_3d)
     train_size = int(0.7 * num_samples)
     val_size = int(0.15 * num_samples)
     test_size = num_samples - train_size - val_size
