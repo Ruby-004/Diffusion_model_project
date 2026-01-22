@@ -832,7 +832,7 @@ class LatentDiffusionPredictor(Predictor):
                 noise_pred = self.model(unet_input, t_batch)
             
             # One-step denoising: x_0 = (x_t - sqrt(1-alpha_bar_t) * noise_pred) / sqrt(alpha_bar_t)
-            alpha_bar = self.scheduler.alpha_bar_t[t]
+            alpha_bar = self.scheduler.alphas_cumprod[t]
             x = (x - torch.sqrt(1 - alpha_bar) * noise_pred) / torch.sqrt(alpha_bar)
             # Clip to reasonable range in latent space
             x = torch.clamp(x, -30.0, 30.0)

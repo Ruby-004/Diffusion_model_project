@@ -275,9 +275,11 @@ python Inference/inference.py `
   Diffusion_model/trained/[model_folder] `
   --vae-encoder-path VAE_model/trained/dual_vae_stage2_2d `
   --vae-decoder-path VAE_model/trained/dual_vae_stage1_3d `
+  --dataset-dir path/to/dataset_3d `
   --index 0
 ```
 
+- `--dataset-dir`: Path to dataset (for loading test samples)
 - `--index`: Test sample index (default: 0)
 
 **Output**: 
