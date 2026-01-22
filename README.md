@@ -388,6 +388,20 @@ project_root/
 
 ### Architecture Design
 
+#### Model workflow - Quick overview
+Stage 1 - VAE 3D Pre-training: How the 3D encoder/decoder learns to compress and reconstruct 3D flows
+
+
+Stage 2 - Dual-Branch VAE with Alignment: Weights from pre-training 3D are frozen. A new 2D encoder + decoder branch is trained with the previously learned information of the 3D VAE. The critical alignment and cross-reconstruction losses force the 2D encoder to learn vertical velocity information.
+
+
+Stage 3: Training the Diffusion Model: Complete flow of adding noise, then denoising with U-net, and learning from microstructure context.
+
+
+Stage 4: Inference Phase: New predictions are generated (from random noise → iterative denoising → final output)
+
+
+
 #### 1. **Variational Autoencoder (VAE) - Dual-Branch Architecture**
 
 **Purpose**: Learn aligned latent representations for 2D and 3D velocity fields, enabling cross-reconstruction from 2D inputs to 3D outputs.
@@ -492,18 +506,11 @@ Inference:
 3. **Stability**: Lower-dimensional space facilitates more stable training than pixel-space diffusion
 4. **Flexibility**: Frozen VAE allows quick model updates without retraining compression
 
-#### Why Physics-Informed?
-
-1. **Data efficiency**: Physics constraints reduce dependency on large training datasets
-2. **Generalization**: Models trained with physics constraints generalize better to unseen conditions
-3. **Physical validity**: Ensures predictions satisfy fundamental conservation laws
-4. **Domain knowledge integration**: Embeds expertise directly into learning objective
 
 #### Why Conditional on 2D Flow?
 
 1. **Better initialization**: 2D field provides strong signal for 3D reconstruction
-2. **Physics-guided**: 2D prediction already solves 2D flow problem; model focuses on adding vertical component
-3. **Practical relevance**: 2D fields are cheaper to compute or may be available from simplified models
+2. **Practical relevance**: 2D fields are cheaper to compute or may be available from simplified models
 
 ### Main Difficulties and Solutions
 
@@ -520,16 +527,8 @@ Inference:
 - Used normalized MAE loss (divides by target magnitude) for scale-invariant training
 - Additional diagnostics in `scripts/diagnose_w_component.py`
 
-#### 2. **Physics Loss Integration**
 
-**Problem**: Physics constraints conflicted with data fitting; training became unstable.
-
-**Solution**:
-- Computed physics losses on decoded fields (not latents) for consistency
-- Tuned loss weights carefully (recommended starting: `--lambda-div 0.01 --lambda-bc 0.1`)
-- Used detached metrics for logging to avoid gradient contamination
-
-#### 3. **Dataset Consistency**
+#### 2. **Dataset Consistency**
 
 **Problem**: VAE and diffusion models could use different data splits, causing train-test contamination.
 
@@ -539,7 +538,7 @@ Inference:
 - Ensures test samples were never seen during training of either model
 - Generated shared `statistics.json` for normalization consistency
 
-#### 4. **Path and Configuration Management**
+#### 3. **Path and Configuration Management**
 
 **Problem**: Model paths broken when loading across different machines/directories.
 
@@ -581,47 +580,18 @@ Inference:
 - **Mitigation**: Use model in eval mode; consider layer norm alternative for better single-sample performance
 - **Addressed via**: Inference script averages over stochastic samples
 
-#### 6. **Physics Loss Uncertainty**
 
-- **Limitation**: Physics loss weights are hyperparameters; no automated tuning mechanism
-- **Mitigation**: Grid search and ablation studies recommended (see PHYSICS_INFORMED_TRAINING.md)
-- **Cost**: Each weight combination requires full retraining
-
-#### 7. **Limited to Steady-State Flows**
+#### 6. **Limited to Steady-State Flows**
 
 - **Limitation**: Model trained on steady-state, incompressible flows only
 - **Scope**: Only handles Darcy-scale (low-Reynolds) flow in porous media
 - **Future work**: Extension to transient or turbulent flows requires architectural changes
 
-#### 8. **Dataset-Specific Normalization**
+#### 7. **Dataset-Specific Normalization**
 
 - **Limitation**: Normalization constants (scale_factor, max values) are dataset-specific
 - **Risk**: Transfer to new datasets requires recomputing statistics
 - **Mitigation**: `statistics.json` auto-generated; must be present for new datasets
-
----
-
-## Key Features
-
-### Physics-Informed Learning
-- Differentiable physics constraints (divergence, flow rate, boundary conditions)
-- Optional weighting to balance data fidelity and physical validity
-- Comprehensive logging of physics metrics during training
-
-### Efficient 3D Prediction
-- Latent-space diffusion for computational efficiency
-- Multi-scale U-Net capturing hierarchical flow patterns
-- GPU acceleration with PyTorch
-
-### Reproducibility
-- Complete configuration logging in `log.json`
-- Deterministic seeding for train/val/test splits
-- Auto-download of datasets and pre-trained models from Zenodo
-
-### Comprehensive Evaluation
-- Quantitative metrics: MAE, RMSE, relative errors per component
-- Qualitative visualization: flow field comparisons, error maps
-- Physics metrics: divergence, flow rate consistency, boundary condition violations
 
 ---
 
