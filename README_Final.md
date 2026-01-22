@@ -318,13 +318,13 @@ project_root/
 - **2D Branch**: The 2D branch consist of a 2-dimensional Encoder (E2D) and a 2-dimensional Decoder (D2D).  The structure of the 2D branch is as follows:
 
 
-  - Input: 2D velocity field `(batch, 3 channels [Vx, Vy, Vz], height, width)` where Vz=0
-  - Output: 2D latent `(batch, latent_channels, height/4, width/4)`
+  - Input: 2D velocity field `(samples, slices, 3 channels [Vx, Vy, Vz], height, width)` where Vz=0
+  - Output: 2D latent `(samples, latent_channels, height/4, width/4)`
 
 
 - **3D Branch**: The 3D branch consists of a 3-dimensional Encoder (E3D) + 3-dimensional decoder (D3D)
-  - Input: 3D velocity field `(batch, 3 channels [Vx, Vy, Vz], depth, height, width)` with non-zero Vz
-  - Output: 3D latent `(batch, latent_channels, depth, height/4, width/4)`
+  - Input: 3D velocity field `(samples, slices, 3 channels [Vx, Vy, Vz], height, width)` with non-zero Vz
+  - Output: 3D latent `(samples, latent_channels, depth, height/4, width/4)`
 
   The depth, width and height represent the spatial dimensions of the measurement surface.
 
