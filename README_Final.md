@@ -111,7 +111,11 @@ project_root/
 
 In this section, all the shell code provided includes the parameters values used to obtain the final model that can be downloaded as described in the pre-trained model section. These can be changed to obtain different models.
 
-#### A. Training a VAE - Two-Stage Process
+#### A. Preprocessing Data
+
+**Important**: The model only works with input microstructures of **256 × 256 pixels** in the (x, y) plane, corresponding to 50μm x 50μm. Ensure all 2D cross-sectional images of the microstructure are resized to this exact dimension before training or inference. The model expects 11 slices along the z-axis (depth) by default. Images of other sizes will cause shape mismatches during model execution. The dataset provided is already structured as such.
+
+#### B. Training a VAE - Two-Stage Process
 
 For reproducibility, a random seed of 2024 was set for the training of both VAEs and a train-validation-test split of 70-15-15.
 
@@ -151,7 +155,7 @@ python train_2d_with_cross.py \
 - Stage 1: Saves checkpoint to `trained/dual_vae_stage1/checkpoint_best.pt`
 - Stage 2: Saves final model to `trained/dual_vae_stage2/` with complete dual-branch VAE
 
-#### B. Training the Latent Diffusion Model
+#### C. Training the Latent Diffusion Model
 Update parameters and explain gridsearch
 For reproducibility, a random seed of 42 was set for the training and a train-validation-test split of 70-15-15.
 
@@ -197,7 +201,7 @@ This script runs through all combinations of hyperparameters (learning rate, bat
 - `top10.csv`: Top 10 configurations ranked by validation loss
 - `summary.txt`: Best configuration details and recommendations
 
-#### C. Evaluating the Model
+#### D. Evaluating the Model
 
 **Quantitative evaluation** on test set:
 
@@ -206,7 +210,7 @@ cd Diffusion_model
 python evaluate.py trained/[timestamp]_unet_latent-diffusion_[params]
 ```
 
-#### D. Running Inference
+#### E. Running Inference
 
 Single-sample prediction using a trained model (index can be changed to infer a different sample):
 
@@ -219,7 +223,7 @@ python Inference/inference.py \
 
 **Output**: Saves visualization to `velocity_field_comparison.png` in the current directory, and displays interactive 3D visualization via Napari viewer.
 
-#### E. Visualizing Training Progress
+#### F. Visualizing Training Progress
 
 Plot training and validation losses:
 
@@ -241,7 +245,6 @@ python scripts/plot_physics_metrics.py \
 ## Program Structure and Design
 
 ### File Structure Overview
-Update after files are removed including Jimmy's README
 
 ```
 project_root/
@@ -272,6 +275,7 @@ project_root/
 ├── Diffusion_model/               # Main latent diffusion component
 │   ├── train.py                  # Training entry point
 │   ├── evaluate.py               # Evaluation script
+│   ├── gridsearch_diffusion.py   # Hyperparameter grid search
 │   ├── config.py                 # Training configuration
 │   ├── src/
 │   │   ├── predictor.py          # LatentDiffusionPredictor class
@@ -288,16 +292,12 @@ project_root/
 │   │   └── zenodo.py             # Zenodo download utilities
 │   ├── scripts/
 │   │   ├── plot_loss.py          # Training loss visualization
-│   │   ├── plot_physics_metrics.py  # Physics metrics visualization
-│   │   ├── diagnose_noise.py     # Noise schedule diagnostics
-│   │   └── diagnose_w_component.py  # Velocity component analysis
+│   │   └── plot_physics_metrics.py  # Physics metrics visualization
 │   └── docs/
-│       ├── PHYSICS_INFORMED_TRAINING.md  # Physics loss tuning guide
-│       └── W_COMPONENT_FIX.md    # Notes on vertical velocity component
+│       └── PHYSICS_INFORMED_TRAINING.md  # Physics loss tuning guide
 │
 ├── Inference/                     # Standalone inference pipeline
-│   ├── inference.py              # Inference entry point
-│   └── prompt.txt                # User interaction templates
+│   └── inference.py              # Inference entry point
 │
 ├── src/                          # Root directory legacy models (2D prediction)
 │   └── unet/
@@ -555,4 +555,8 @@ During building of the model there has been an attempt to implement physics-info
 
 ---
 
-**Last Updated**: January 2025
+## Training Power Required
+
+Training the VAE for the final model required 10h with 2 GPUs on the DelftBlue supercomputer and training the diffusion model required only 1h30 with one GPU (MSI GeForce RTX 5070 Ti 16G GAMING TRIO OC) on a personal computer.
+
+**Last Updated**: January 2026
