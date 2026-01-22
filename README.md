@@ -75,16 +75,15 @@ Pre-trained models and the dataset are hosted on Zenodo.
 project_root/
 ├── data/
 │   └── dataset_3d/
-│       ├── x/                      # Flow in x-direction
+│       ├── x/                       
 │       │   ├── domain.pt           # Microstructure masks
 │       │   ├── U_2d.pt             # 2D velocity (vz=0)
 │       │   ├── U.pt                # 3D velocity (target)
 │       │   ├── p.pt                # Pressure fields
-│       │   ├── dxyz.pt             # Physical dimensions
-│       │   └── permeability.pt     # Permeability values
-│       ├── y/                      # Flow in y-direction (optional)
-│       │   └── ...                 # Same structure as x/
+│       │   └── dxyz.pt             # Physical dimensions
+│       │   
 │       └── statistics.json         # Normalization statistics
+│
 ├── VAE_model/
 │   └── trained/
 │       ├── dual_vae_stage1_3d/
@@ -95,6 +94,7 @@ project_root/
 │           ├── model.pt
 │           ├── best_model.pt
 │           └── vae_log.json
+│
 └── Diffusion_model/
     └── trained/
         └── [model_folder]/
