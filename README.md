@@ -75,22 +75,29 @@ Pre-trained models and the dataset are hosted on Zenodo.
 project_root/
 ├── data/
 │   └── dataset_3d/
-│       ├── domain.pt
-│       ├── U_2d.pt
-│       ├── U.pt
-│       ├── p.pt
-│       └── statistics.json
+│       ├── x/                      # Flow in x-direction
+│       │   ├── domain.pt           # Microstructure masks
+│       │   ├── U_2d.pt             # 2D velocity (vz=0)
+│       │   ├── U.pt                # 3D velocity (target)
+│       │   ├── p.pt                # Pressure fields
+│       │   ├── dxyz.pt             # Physical dimensions
+│       │   └── permeability.pt     # Permeability values
+│       ├── y/                      # Flow in y-direction (optional)
+│       │   └── ...                 # Same structure as x/
+│       └── statistics.json         # Normalization statistics
 ├── VAE_model/
 │   └── trained/
 │       ├── dual_vae_stage1_3d/
-│       │   └── checkpoint_best.pt  # Stage 1: 3D VAE only
+│       │   ├── model.pt
+│       │   ├── best_model.pt
+│       │   └── vae_log.json
 │       └── dual_vae_stage2_2d/
-│           ├── model.pt            # Stage 2: Complete dual-branch VAE
-│           ├── checkpoint_best.pt
-│           └── log.json
+│           ├── model.pt
+│           ├── best_model.pt
+│           └── vae_log.json
 └── Diffusion_model/
     └── trained/
-        └── [timestamp]_unet_latent-diffusion_[params]/
+        └── [model_folder]/
             ├── model.pt
             ├── best_model.pt
             └── log.json
@@ -145,8 +152,8 @@ python train_2d_with_cross.py `
 ```
 
 **Outputs**: 
-- Stage 1: `trained/dual_vae_stage1_3d/checkpoint_best.pt` — 3D VAE weights
-- Stage 2: `trained/dual_vae_stage2_2d/` — Complete dual-branch VAE (E2D, D2D, E3D, D3D)
+- Stage 1: `trained/dual_vae_stage1_3d/` — 3D VAE checkpoint (model.pt, best_model.pt, vae_log.json)
+- Stage 2: `trained/dual_vae_stage2_2d/` — Complete dual-branch VAE (model.pt, best_model.pt, vae_log.json)
 
 #### C. Training the Latent Diffusion Model
 
@@ -326,64 +333,59 @@ python plot_vae_loss.py trained/dual_vae_stage2_2d
 
 ```
 project_root/
-├── data/                          # Dataset storage
-│   └── dataset_3d/                # Main dataset (auto-downloaded)
-│
-├── VAE_model/                     # Variational Autoencoder component (Dual-Branch)
-│   ├── train_3d_vae_only.py      # Stage 1: Train 3D VAE (E3D + D3D)
-│   ├── train_2d_with_cross.py    # Stage 2: Train 2D VAE with alignment & cross-reconstruction
-│   ├── inference_vae.py          # VAE inference utility
+├── VAE_model/                         # Variational Autoencoder (Dual-Branch)
+│   ├── train_3d_vae_only.py           # Stage 1: Train 3D VAE (E3D + D3D)
+│   ├── train_2d_with_cross.py         # Stage 2: Train 2D VAE with alignment
+│   ├── inference_vae.py               # VAE inference/visualization
+│   ├── plot_vae_loss.py               # Plot training curves
 │   ├── config/
-│   │   └── vae.py                # VAE configuration
+│   │   └── vae.py                     # VAE configuration
 │   ├── src/
-│   │   ├── common.py             # Shared utilities
+│   │   ├── common.py                  # Shared utilities
 │   │   ├── dual_vae/
-│   │   │   ├── __init__.py
-│   │   │   └── model.py          # DualBranchVAE architecture (E2D, D2D, E3D, D3D)
+│   │   │   └── model.py               # DualBranchVAE (E2D, D2D, E3D, D3D)
 │   │   └── vae/
-│   │       ├── autoencoder.py    # Standard VAE (encoder + decoder)
-│   │       ├── encoder.py        # 3D encoder with attention
-│   │       ├── decoder.py        # Mirror decoder
-│   │       └── blocks.py         # Residual and attention blocks
-│   └── utils/
-│       ├── dataset.py            # VAE dataset loader with 2D/3D support
-│       ├── metrics.py            # Loss functions (normalized MAE, KL divergence)
-│       └── paired_sampler.py     # Sampler for paired 2D/3D data
-│
-├── Diffusion_model/               # Main latent diffusion component
-│   ├── train.py                  # Training entry point
-│   ├── evaluate.py               # Evaluation script
-│   ├── gridsearch_diffusion.py   # Hyperparameter grid search
-│   ├── config.py                 # Training configuration
-│   ├── src/
-│   │   ├── predictor.py          # LatentDiffusionPredictor class
-│   │   ├── diffusion.py          # DDPM diffusion scheduler
-│   │   ├── physics.py            # Physics-informed loss functions
-│   │   ├── normalizer.py         # Data normalization utilities
-│   │   ├── helper.py             # Training utilities
-│   │   └── unet/
-│   │       ├── models.py         # U-Net architecture for latent space
-│   │       ├── blocks.py         # U-Net building blocks
-│   │       └── metrics.py        # Loss functions
+│   │       ├── autoencoder.py         # Standard VAE wrapper
+│   │       ├── encoder.py             # Encoder with attention
+│   │       ├── decoder.py             # Decoder (mirror of encoder)
+│   │       └── blocks.py              # Residual and attention blocks
 │   ├── utils/
-│   │   ├── dataset.py            # 3D microflow dataset loader
-│   │   └── zenodo.py             # Zenodo download utilities
+│   │   ├── dataset.py                 # VAE dataset loader
+│   │   ├── metrics.py                 # Loss functions
+│   │   └── paired_sampler.py          # Paired 2D/3D sampling
+│   └── trained/                       # Saved model checkpoints
+│
+├── Diffusion_model/                   # Latent Diffusion Model
+│   ├── train.py                       # Training entry point
+│   ├── evaluate.py                    # Evaluation script
+│   ├── gridsearch_diffusion.py        # Hyperparameter search
+│   ├── config.py                      # CLI argument parsing
+│   ├── src/
+│   │   ├── predictor.py               # LatentDiffusionPredictor class
+│   │   ├── diffusion.py               # DDPM/DDIM scheduler
+│   │   ├── physics.py                 # Physics-informed losses
+│   │   ├── normalizer.py              # Data normalization
+│   │   ├── helper.py                  # Training utilities
+│   │   └── unet/
+│   │       ├── models.py              # U-Net architecture
+│   │       ├── blocks.py              # U-Net building blocks
+│   │       └── metrics.py             # Loss functions
+│   ├── utils/
+│   │   ├── dataset.py                 # 3D microflow dataset loader
+│   │   └── zenodo.py                  # Zenodo download utilities
 │   ├── scripts/
-│       ├── plot_loss.py          # Training loss visualization
-│       └── plot_physics_metrics.py  # Physics metrics visualization
-│   
-│      
+│   │   ├── plot_loss.py               # Plot training loss
+│   │   └── plot_physics_metrics.py    # Plot physics metrics
+│   └── trained/                       # Saved model checkpoints
 │
-├── Inference/                     # Standalone inference pipeline
-│   └── inference.py              # Inference entry point
+├── Inference/                         # Standalone inference
+│   └── inference.py                   # Run predictions on test samples
 │
-├── src/                          # Root directory legacy models (2D prediction)
-│   └── unet/
+├── scripts/                           # Root-level evaluation scripts
+│   └── eval_testset_end2end.py        # Comprehensive end-to-end evaluation
 │
-├── utils/                        # Shared utilities
-│
-├── requirements.txt              # Python dependencies
-└── README.md                     # Documentation
+├── requirements.txt                   # Python dependencies
+└── README.md                          # This file
 ```
 
 ### Architecture Design
@@ -518,7 +520,6 @@ Inference:
 - Reduced KL weight from 1e-0 to 1e-3 (prioritizing reconstruction)
 - Applied scale factor normalization for stable gradients
 - Used normalized MAE loss (divides by target magnitude) for scale-invariant training
-- Additional diagnostics in `scripts/diagnose_w_component.py`
 
 #### 2. **Physics Loss Integration**
 
@@ -526,7 +527,7 @@ Inference:
 
 **Solution**:
 - Computed physics losses on decoded fields (not latents) for consistency
-- Tuned loss weights carefully (recommended starting: `--lambda-div 0.01 --lambda-bc 0.1`)
+- Tuned loss weights carefully (recommended starting: `--lambda-div 0.01 --lambda-smooth 0.1`)
 - Used detached metrics for logging to avoid gradient contamination
 
 #### 3. **Dataset Consistency**
