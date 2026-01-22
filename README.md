@@ -175,6 +175,7 @@ python train.py `
   --weight-decay 0 `
   --use-3d True `
   --num-slices 11
+  --attention '3..2'
 ```
 
 **Key parameters:**
@@ -635,7 +636,7 @@ Inference:
 
 **Memory requirements**: 
 - VAE training: ~12 GB VRAM with batch size 2
-- Diffusion training: ~14 GB VRAM with batch size 2
+- Diffusion training: ~30 GB VRAM with batch size 2
 
 ---
 

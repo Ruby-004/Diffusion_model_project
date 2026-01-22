@@ -147,7 +147,7 @@ group_train.add_argument(
 group_train.add_argument(
     '--cost-function',
     type=str,
-    default='normalized_mae_loss',
+    default='normalized_mse_loss_per_component',
     choices=['normalized_mae_loss', 'normalized_mse_loss', 'mae_loss', 'mse_loss', 'huber_loss', 
              'normalized_mae_loss_per_component', 'mae_loss_per_component', 
              'mse_loss_per_component', 'normalized_mse_loss_per_component'],
@@ -244,7 +244,7 @@ group_train.add_argument(
     '--features',
     type=int,
     nargs='+',
-    default=[64, 128, 256, 512, 1024, 2048],
+    default=[64, 128, 256, 512, 1024],
     help='Number of channels at each (depth) level in the U-Net architecture.'
 )
 group_train.add_argument(
@@ -318,7 +318,7 @@ group_train.add_argument(
 group_train.add_argument(
     '--use-3d',
     type=str_to_bool,
-    default=False,
+    default=True,
     help='Whether to use 3D velocity data from dataset.'
 )
 group_train.add_argument(
