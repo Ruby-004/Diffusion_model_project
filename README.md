@@ -61,7 +61,7 @@ Models are auto-downloaded on first use. The system caches them in `pretrained/`
 
 ```bash
 # During training or inference, models are automatically fetched:
-python Diffusion_model/train.py --root-dir data/rve_5k_xy \
+python Diffusion_model/train.py --root-dir data/dataset_3d \
   --vae-path https://zenodo.org/records/XXXXX/files/vae_new_8.zip
 ```
 
@@ -78,14 +78,14 @@ python Diffusion_model/train.py --root-dir data/rve_5k_xy \
 
 3. **Dataset** (for training and evaluation):
    - Download from [Zenodo Record](https://doi.org/10.5281/zenodo.16940478)
-   - Extract to `data/rve_5k_xy/`
+   - Extract to `data/dataset_3d/`
 
 #### Directory Structure After Download
 
 ```
 project_root/
 ├── data/
-│   └── rve_5k_xy/
+│   └── dataset_3d/
 │       ├── domain.pt
 │       ├── U_2d.pt
 │       ├── U.pt
@@ -123,31 +123,31 @@ For reproducibility, a random seed of 2024 was set for the training of both VAEs
 
 ```bash
 cd VAE_model
-python train_3d_vae_only.py \
-  --dataset-dir ../data/rve_5k_xy \
-  --save-dir trained/dual_vae_stage1 \
-  --in-channels 3 \
-  --latent-channels 8 \
-  --batch-size 2 \
-  --num-epochs 100 \
-  --learning-rate 1e-4 \
+python train_3d_vae_only.py `
+  --dataset-dir ../data/dataset_3d `
+  --save-dir trained/dual_vae_stage1 `
+  --in-channels 3 `
+  --latent-channels 8 `
+  --batch-size 2 `
+  --num-epochs 100 `
+  --learning-rate 1e-4 `
   --per-component-norm
 ```
 
 **Stage 2: Train 2D VAE with alignment and cross-reconstruction**
 
 ```bash
-python train_2d_with_cross.py \
-  --dataset-dir ../data/rve_5k_xy \
-  --save-dir trained/dual_vae_stage2 \
-  --stage1-checkpoint trained/dual_vae_stage1/checkpoint_best.pt \
-  --in-channels 3 \
-  --latent-channels 8 \
-  --batch-size 1 \
-  --num-epochs 100 \
-  --learning-rate 1e-4 \
-  --per-component-norm \
-  --lambda-align 5 \
+python train_2d_with_cross.py `
+  --dataset-dir ../data/dataset_3d `
+  --save-dir trained/dual_vae_stage2 `
+  --stage1-checkpoint trained/dual_vae_stage1/checkpoint_best.pt `
+  --in-channels 3 `
+  --latent-channels 8 `
+  --batch-size 1 `
+  --num-epochs 100 `
+  --learning-rate 1e-4 `
+  --per-component-norm `
+  --lambda-align 5 `
   --lambda-cross 50
 ```
 
@@ -161,22 +161,23 @@ For reproducibility, a random seed of 42 was set for the training and a train-va
 
 ```bash
 cd Diffusion_model
-python train.py \
-  --root-dir ../data/rve_5k_xy \
-  --vae-path ../VAE_model/trained/dual_vae_stage2 \
-  --predictor-type latent-diffusion \
-  --in-channels 17 \
-  --out-channels 8 \
-  --features 64 128 256 512 1024 \
-  --batch-size 2 \
-  --num-epochs 100 \
-  --learning-rate 1e-4 \
-  --weight-decay 0 \
-  --use-3d True \
-  --num-slices 11 \
-  --lambda-div 0.0 \
-  --lambda-bc 0.0 \
-  --lambda-flow 0.0 \
+python train.py `
+  --root-dir ../data/dataset_3d `
+  --vae-encoder-path ../path/to/encodervae `
+  --vae-decoder-path ../path/to/decodervae `
+  --predictor-type latent-diffusion `
+  --in-channels 17 `
+  --out-channels 8 `
+  --features 64 128 256 512 1024 `
+  --batch-size 2 `
+  --num-epochs 100 `
+  --learning-rate 1e-3 `
+  --weight-decay 0 `
+  --use-3d True `
+  --num-slices 11 `
+  --lambda-div 0.0 `
+  --lambda-laplacian 0.0 `
+  --lambda-flow 0.0 `
   --lambda-smooth 0.0
 ```
 
@@ -223,6 +224,10 @@ python Inference/inference.py \
 
 **Output**: Saves visualization to `velocity_field_comparison.png` in the current directory, and displays interactive 3D visualization via Napari viewer.
 
+VAE inference:
+
+
+
 #### F. Visualizing Training Progress
 
 Plot training and validation losses:
@@ -242,6 +247,8 @@ python scripts/plot_physics_metrics.py \
 
 ---
 
+plot loss of vae:
+
 ## Program Structure and Design
 
 ### File Structure Overview
@@ -249,7 +256,7 @@ python scripts/plot_physics_metrics.py \
 ```
 project_root/
 ├── data/                          # Dataset storage
-│   └── rve_5k_xy/                # Main dataset (auto-downloaded)
+│   └── dataset_3d/                # Main dataset (auto-downloaded)
 │
 ├── VAE_model/                     # Variational Autoencoder component (Dual-Branch)
 │   ├── train_3d_vae_only.py      # Stage 1: Train 3D VAE (E3D + D3D)
@@ -291,10 +298,10 @@ project_root/
 │   │   ├── dataset.py            # 3D microflow dataset loader
 │   │   └── zenodo.py             # Zenodo download utilities
 │   ├── scripts/
-│   │   ├── plot_loss.py          # Training loss visualization
-│   │   └── plot_physics_metrics.py  # Physics metrics visualization
-│   └── docs/
-│       └── PHYSICS_INFORMED_TRAINING.md  # Physics loss tuning guide
+│       ├── plot_loss.py          # Training loss visualization
+│       └── plot_physics_metrics.py  # Physics metrics visualization
+│   
+│      
 │
 ├── Inference/                     # Standalone inference pipeline
 │   └── inference.py              # Inference entry point
@@ -305,7 +312,7 @@ project_root/
 ├── utils/                        # Shared utilities
 │
 ├── requirements.txt              # Python dependencies
-└── README.md, README_Final.md    # Documentation
+└── README.md                     # Documentation
 ```
 
 ### Architecture Design
