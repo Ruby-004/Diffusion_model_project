@@ -61,7 +61,7 @@ Models are auto-downloaded on first use. The system caches them in `pretrained/`
 
 ```bash
 # During training or inference, models are automatically fetched:
-python Diffusion_model/train.py --root-dir data/dataset_3d \
+python Diffusion_model/train.py --root-dir path/to/dataset_3d \
   --vae-path https://zenodo.org/records/XXXXX/files/vae_new_8.zip
 ```
 
@@ -69,8 +69,8 @@ python Diffusion_model/train.py --root-dir data/dataset_3d \
 
 1. **VAE Model** (required for latent diffusion):
    - Download from [Zenodo Record](https://doi.org/10.5281/zenodo.16940478)
-   - Extract stage 1 checkpoint to `VAE_model/trained/dual_vae_stage1/`
-   - Extract stage 2 checkpoint to `VAE_model/trained/dual_vae_stage2/`
+   - Extract stage 1 checkpoint to `VAE_model/trained/dual_vae_stage1_3d/`
+   - Extract stage 2 checkpoint to `VAE_model/trained/dual_vae_stage2_2d/`
 
 2. **Diffusion Model** (for inference only):
    - Available at [Zenodo Record](https://doi.org/10.5281/zenodo.17306446)
@@ -93,9 +93,9 @@ project_root/
 │       └── statistics.json
 ├── VAE_model/
 │   └── trained/
-│       ├── dual_vae_stage1/
+│       ├── dual_vae_stage1_3d/
 │       │   └── checkpoint_best.pt  # Stage 1: 3D VAE only
-│       └── dual_vae_stage2/
+│       └── dual_vae_stage2_2d/
 │           ├── model.pt            # Stage 2: Complete dual-branch VAE
 │           ├── checkpoint_best.pt
 │           └── log.json
@@ -124,8 +124,8 @@ For reproducibility, a random seed of 2024 was set for the training of both VAEs
 ```bash
 cd VAE_model
 python train_3d_vae_only.py `
-  --dataset-dir ../data/dataset_3d `
-  --save-dir trained/dual_vae_stage1 `
+  --dataset-dir ../path/to/dataset_3d `
+  --save-dir trained/dual_vae_stage1_3d `
   --in-channels 3 `
   --latent-channels 8 `
   --batch-size 2 `
@@ -138,9 +138,9 @@ python train_3d_vae_only.py `
 
 ```bash
 python train_2d_with_cross.py `
-  --dataset-dir ../data/dataset_3d `
-  --save-dir trained/dual_vae_stage2 `
-  --stage1-checkpoint trained/dual_vae_stage1/checkpoint_best.pt `
+  --dataset-dir ../path/to/dataset_3d `
+  --save-dir trained/dual_vae_stage2_2d `
+  --stage1-checkpoint trained/dual_vae_stage1_3d
   --in-channels 3 `
   --latent-channels 8 `
   --batch-size 1 `
@@ -152,8 +152,8 @@ python train_2d_with_cross.py `
 ```
 
 **Output**: 
-- Stage 1: Saves checkpoint to `trained/dual_vae_stage1/checkpoint_best.pt`
-- Stage 2: Saves final model to `trained/dual_vae_stage2/` with complete dual-branch VAE
+- Stage 1: Saves checkpoint to `trained/dual_vae_stage1_3d`
+- Stage 2: Saves final model to `trained/dual_vae_stage2_2d` with complete dual-branch VAE
 
 #### C. Training the Latent Diffusion Model
 Update parameters and explain gridsearch
@@ -162,9 +162,9 @@ For reproducibility, a random seed of 42 was set for the training and a train-va
 ```bash
 cd Diffusion_model
 python train.py `
-  --root-dir ../data/dataset_3d `
-  --vae-encoder-path ../path/to/encodervae `
-  --vae-decoder-path ../path/to/decodervae `
+  --root-dir ../path/to/dataset_3d `
+  --vae-encoder-path ../trained/dual_vae_stage1_3d `
+  --vae-decoder-path ../trained/dual_vae_stage1_3d `
   --predictor-type latent-diffusion `
   --in-channels 17 `
   --out-channels 8 `
@@ -188,7 +188,23 @@ python train.py `
 
 **Grid Search**:
 
-The final diffusion model hyperparameters were chosen by performing a gridsearch. The grid used is hard coded into gridsearch_diffusion.py and the model that showed the lowest validation loss was used. 
+The final diffusion model hyperparameters were chosen by performing a gridsearch. The grid used is hard coded into [gridsearch_diffusion.py](Diffusion_model/gridsearch_diffusion.py) and the model that showed the lowest validation loss was used.
+
+**Grid Search Space**:
+- **Network Depth (features)**: 4 architecture variants
+  - `[64, 128, 256, 512]` (depth 4)
+  - `[64, 128, 256, 512, 1024]` (depth 5, baseline)
+  - `[32, 64, 128, 256, 512]` (depth 5, lighter)
+  - `[128, 256, 512, 1024, 2048]` (depth 5, wider)
+- **Kernel Size**: `[3]` (fixed for computational efficiency)
+- **Attention**: `["3..2"]` (attention from level 3 with 2 heads, fixed)
+- **Learning Rate**: `[5e-5, 1e-4, 5e-4, 1e-3]` (4 values)
+- **Dropout**: `[0.0]` (fixed, no dropout)
+- **Time Embedding Dimension**: `[64]` (fixed)
+
+**Total combinations**: 4 × 1 × 1 × 4 × 1 × 1 = **16 runs**
+
+Each run trains for **15 epochs** with a fixed random seed (2024) for reproducibility.
 
 To perform the hyperparameter grid search:
 
@@ -197,19 +213,53 @@ cd Diffusion_model
 python gridsearch_diffusion.py
 ```
 
-This script runs through all combinations of hyperparameters (learning rate, batch size, physics loss weights, etc.) and saves:
-- `results.csv`: All runs with hyperparameters and validation metrics
-- `top10.csv`: Top 10 configurations ranked by validation loss
+**Output**:
+- `results.csv`: All 20 runs with hyperparameters and validation metrics
+- `top10.csv`: Top 10 configurations ranked by best validation loss
 - `summary.txt`: Best configuration details and recommendations
+
+The best configuration is automatically saved to `trained/gridsearch_per_component/` subdirectories.
 
 #### D. Evaluating the Model
 
-**Quantitative evaluation** on test set:
+**1. Basic Test Set Evaluation**
+
+Quantitative metrics (MAE, RMSE) on the test set:
 
 ```bash
 cd Diffusion_model
 python evaluate.py trained/[timestamp]_unet_latent-diffusion_[params]
 ```
+
+**Output**: Prints test loss and saves metrics to the model directory.
+
+**2. End-to-End Evaluation with Advanced Metrics**
+
+Comprehensive evaluation including per-component metrics, cosine similarity, and IoU:
+
+```bash
+python scripts/eval_testset_end2end.py `
+  --diffusion-model-path Diffusion_model/trained/[timestamp]_unet_latent-diffusion_[params] `
+  --vae-encoder-path VAE_model/trained/dual_vae_stage2_2d `
+  --vae-decoder-path VAE_model/trained/dual_vae_stage1_3d `
+  --dataset-dir path/to/dataset_3d `
+  --sampler ddim `
+  --steps 50 `
+```
+
+**Metrics computed**:
+- Per-component MAE/MSE/RMSE for u, v, w velocity components
+- Normalized MAE/MSE (using dataset statistics)
+- Cosine similarity between velocity vectors
+- IoU of top-k magnitude voxels (structure agreement)
+- Combined accuracy score
+
+**Optional flags**:
+- `--sampler ddim` or `--sampler ddpm` (default: ddim for faster inference)
+- `--steps N`: Number of diffusion steps (default: 50)
+- `--sanity-mode`: Run VAE-only reconstruction check (bypasses diffusion model)
+
+**Output**: JSON file with aggregated metrics (mean ± std) and optional CSV with per-sample results.
 
 #### E. Running Inference
 
@@ -218,36 +268,61 @@ Single-sample prediction using a trained model (index can be changed to infer a 
 ```bash
 python Inference/inference.py \
   Diffusion_model/trained/[timestamp]_unet_latent-diffusion_[params] \
-  --vae-path VAE_model/trained/dual_vae_stage2 \
+  --vae-path VAE_model/trained/dual_vae_stage2_2d \
   --index 0
 ```
 
 **Output**: Saves visualization to `velocity_field_comparison.png` in the current directory, and displays interactive 3D visualization via Napari viewer.
 
-VAE inference:
+**VAE inference** (testing VAE reconstruction quality):
 
+```bash
+cd VAE_model
+python inference_vae.py `
+  --model-path trained/dual_vae_stage2_2d `
+  --dataset-dir ../path/to/dataset_3d `
+  --index 0
+```
 
+This reconstructs both 2D and 3D velocity fields from a test sample and displays:
+- Original vs reconstructed 2D fields
+- Original vs reconstructed 3D fields
+- Cross-reconstruction (2D latent → 3D decoder)
+
+**Output**: Saves comparison plots and displays Napari visualization.
 
 #### F. Visualizing Training Progress
 
-Plot training and validation losses:
+**Plot diffusion model training progress:**
 
 ```bash
 cd Diffusion_model
-python scripts/plot_loss.py \
+python scripts/plot_loss.py `
   trained/[timestamp]_unet_latent-diffusion_[params]/log.json
 ```
 
-Plot physics metrics (divergence, flow rate consistency, etc.):
+**Plot physics metrics** (divergence, flow rate consistency, etc.):
 
 ```bash
-python scripts/plot_physics_metrics.py \
+python scripts/plot_physics_metrics.py `
   trained/[timestamp]_unet_latent-diffusion_[params]/log.json
 ```
 
----
+**Plot VAE training loss:**
 
-plot loss of vae:
+```bash
+cd VAE_model
+python plot_vae_loss.py `
+  trained/dual_vae_stage1_3d/log.json
+
+# For stage 2 dual VAE
+python plot_vae_loss.py `
+  trained/dual_vae_stage2_2d/log.json
+```
+
+**Output**: Generates loss curves showing training and validation metrics over epochs, including reconstruction loss, KL divergence, and (for stage 2) alignment and cross-reconstruction losses.
+
+---
 
 ## Program Structure and Design
 

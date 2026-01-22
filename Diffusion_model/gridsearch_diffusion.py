@@ -134,7 +134,7 @@ GRID = {
     
     # Learning rate
     # Center: 1e-4, explore 0.5x and 2x
-    "learning_rate": [5e-4, 1e-3, 2e-3, 5e-3, 1e-2],
+    "learning_rate": [5e-5, 1e-4, 5e-4, 1e-3],
     
     # Dropout for regularization
     "dropout": [0.0],
