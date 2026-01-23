@@ -361,8 +361,10 @@ cd Diffusion_model
 cd scripts
 ```
 ```bash
-python plot_loss.py trained/[model_folder]
+python plot_loss.py ../trained/model_folder_name
 ```
+
+Output is saved in the `scripts/` directory.
 
 **Plot physics metrics** (if physics-informed training was used):
 
@@ -371,8 +373,10 @@ cd Diffusion_model
 cd scripts
 ```
 ```bash
-python plot_physics_metrics.py trained/[model_folder]
+python plot_physics_metrics.py ../trained/model_folder_name
 ```
+
+Output is saved in the `scripts/` directory.
 
 **Plot VAE training loss:**
 
