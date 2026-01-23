@@ -132,6 +132,8 @@ All dataset loaders use a hardcoded **seed=2024** for the **70/15/15** train/val
 
 ```bash
 cd VAE_model
+```
+```bash
 python train_3d_vae_only.py `
   --dataset-dir ../path/to/dataset_3d `
   --save-dir trained/dual_vae_stage1_3d `
@@ -172,6 +174,8 @@ The dataset loader uses a hardcoded **seed=2024** for the **70/15/15** train/val
 
 ```bash
 cd Diffusion_model
+```
+```bash
 python train.py `
   --root-dir ../path/to/dataset_3d `
   --vae-encoder-path ../VAE_model/trained/dual_vae_stage2_2d `
@@ -219,6 +223,8 @@ To run the grid search:
 
 ```bash
 cd Diffusion_model
+```
+```bash
 python gridsearch_diffusion.py `
   --root-dir ../path/to/dataset_3d `
   --vae-encoder-path ../VAE_model/trained/dual_vae_stage2_2d `
@@ -242,6 +248,8 @@ Compute quantitative metrics on the test set:
 
 ```bash
 cd Diffusion_model
+```
+```bash
 python evaluate.py trained/[timestamp]_unet_latent-diffusion_[params]
 ```
 
@@ -301,6 +309,8 @@ python Inference/inference.py `
 
 ```bash
 cd VAE_model
+```
+```bash
 python inference_vae.py `
   --model-path trained/dual_vae_stage2_2d `
   --dataset-dir ../path/to/dataset_3d `
@@ -318,6 +328,8 @@ Displays:
 
 ```bash
 cd Diffusion_model
+```
+```bash
 python scripts/plot_loss.py trained/[model_folder]
 ```
 
@@ -331,8 +343,11 @@ python scripts/plot_physics_metrics.py trained/[model_folder]
 
 ```bash
 cd VAE_model
+```
+```bash
 python plot_vae_loss.py trained/dual_vae_stage1_3d
-
+```
+```bash
 # For stage 2 dual VAE
 python plot_vae_loss.py trained/dual_vae_stage2_2d
 ```
