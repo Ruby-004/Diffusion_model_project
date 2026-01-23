@@ -4,6 +4,8 @@ This project implements a machine learning pipeline for predicting **3D resin fl
 
 **Key idea**: Given a 2D velocity field (where the vertical component $v_z = 0$), the model predicts the full 3D velocity field with realistic vertical flow components.
 
+**Disclaimer**: This model is trained on CFD simulations that relies in several physical assumptions. With the added model errors, this model doesn't guarantee 100% fidelity in representation of real life flow phenomena. When applied in industry, the model should be used only as a supplementary tool and validated through additional testing.
+
 ## Table of Contents
 
 1. [Quick Start](#quick-start)
@@ -26,24 +28,35 @@ This project implements a machine learning pipeline for predicting **3D resin fl
 # Clone repository
 git clone https://github.com/Ruby-004/Diffusion_model_project.git
 cd Diffusion_model_project
-
+```
+```bash
 # Create virtual environment with Python 3.11
 py -3.11 -m venv venv
-
+```
+```bash
 # Activate (Windows PowerShell)
 venv\Scripts\activate
 # Activate (Linux/macOS)
 # source venv/bin/activate
+```
+```bash
+# Upgrade core packaging tools (recommended)
+python -m pip install --upgrade pip setuptools wheel
+```
 
+
+```bash
 # Install PyTorch with CUDA 12.6 (recommended)
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
 
 # For newer GPUs (RTX 40xx/50xx with CUDA 12.8):
 # pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
-
+```
+```bash
 # Install remaining dependencies
 pip install -r requirements.txt
-
+```
+```bash
 # Verify installation
 python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
 ```
@@ -122,6 +135,8 @@ All dataset loaders use a hardcoded **seed=2024** for the **70/15/15** train/val
 
 ```bash
 cd VAE_model
+```
+```bash
 python train_3d_vae_only.py `
   --dataset-dir ../dataset_3d `
   --save-dir trained/dual_vae_stage1_3d `
@@ -165,6 +180,8 @@ The dataset loader uses a hardcoded **seed=2024** for the **70/15/15** train/val
 ```bash
 cd ..
 cd Diffusion_model
+```
+```bash
 python train.py `
   --root-dir ../dataset_3d `
   --vae-encoder-path ../VAE_model/trained/dual_vae_stage2_2d `
@@ -214,6 +231,8 @@ To run the grid search:
 
 ```bash
 cd Diffusion_model
+```
+```bash
 python gridsearch_diffusion.py `
   --root-dir ../dataset_3d `
   --vae-encoder-path ../VAE_model/trained/dual_vae_stage2_2d `
@@ -237,6 +256,8 @@ Compute quantitative metrics on the test set:
 
 ```bash
 cd Diffusion_model
+```
+```bash
 python evaluate.py trained/[timestamp]_unet_latent-diffusion_[params]
 ```
 
@@ -297,6 +318,8 @@ python Inference/inference.py `
 
 ```bash
 cd VAE_model
+```
+```bash
 python inference_vae.py `
   --model-path trained/dual_vae_stage2_2d `
   --dataset-dir ../dataset_3d `
@@ -315,6 +338,8 @@ Displays:
 ```bash
 cd ..
 cd Diffusion_model
+```
+```bash
 python scripts/plot_loss.py trained/[model_folder]
 ```
 
@@ -329,8 +354,11 @@ python scripts/plot_physics_metrics.py trained/[model_folder]
 ```bash
 cd ..
 cd VAE_model
+```
+```bash
 python plot_vae_loss.py trained/dual_vae_stage1_3d
-
+```
+```bash
 # For stage 2 dual VAE
 python plot_vae_loss.py trained/dual_vae_stage2_2d
 ```
