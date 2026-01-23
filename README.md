@@ -26,24 +26,35 @@ This project implements a machine learning pipeline for predicting **3D resin fl
 # Clone repository
 git clone <repository-url>
 cd Diffusion_model_project
-
+```
+```bash
 # Create virtual environment with Python 3.11
 py -3.11 -m venv venv
-
+```
+```bash
 # Activate (Windows PowerShell)
 venv\Scripts\activate
 # Activate (Linux/macOS)
 # source venv/bin/activate
+```
+```bash
+# Upgrade core packaging tools (recommended)
+python -m pip install --upgrade pip setuptools wheel
+```
 
+
+```bash
 # Install PyTorch with CUDA 12.6 (recommended)
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
 
 # For newer GPUs (RTX 40xx/50xx with CUDA 12.8):
 # pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
-
+```
+```bash
 # Install remaining dependencies
 pip install -r requirements.txt
-
+```
+```bash
 # Verify installation
 python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
 ```
