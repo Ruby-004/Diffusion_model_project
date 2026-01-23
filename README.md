@@ -77,6 +77,11 @@ cd ..
 
 Pre-trained models and the dataset are hosted on Zenodo: [**https://doi.org/10.5281/zenodo.18341260**](https://doi.org/10.5281/zenodo.18341260)
 
+To automaticly download the files and unzip into their designated folders use this command:
+```bash
+python -c "from Diffusion_model.utils.zenodo import *; download_dataset('./dataset_3d'); download_vae_models('./VAE_model/trained'); download_diffusion_model('./Diffusion_model/trained')"
+```
+
 **Downloads:**
 
 All files are available from the same Zenodo record:

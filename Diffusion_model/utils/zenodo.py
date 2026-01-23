@@ -128,6 +128,8 @@ def download_dataset(save_dir: str = "./dataset_3d") -> str:
     parent_dir = osp.dirname(osp.abspath(save_dir))
     zip_path = download_data(DATASET_URL, parent_dir)
     folder_path = unzip_data(zip_path, parent_dir)
+    os.remove(zip_path)
+    print(f'Removed zip file: "{zip_path}"')
     return folder_path
 
 
@@ -144,6 +146,8 @@ def download_vae_models(save_dir: str = "./VAE_model/trained") -> str:
     os.makedirs(save_dir, exist_ok=True)
     zip_path = download_data(VAE_MODELS_URL, save_dir)
     folder_path = unzip_data(zip_path, save_dir)
+    os.remove(zip_path)
+    print(f'Removed zip file: "{zip_path}"')
     return folder_path
 
 
@@ -160,4 +164,6 @@ def download_diffusion_model(save_dir: str = "./Diffusion_model/trained") -> str
     os.makedirs(save_dir, exist_ok=True)
     zip_path = download_data(DIFFUSION_MODEL_URL, save_dir)
     folder_path = unzip_data(zip_path, save_dir)
+    os.remove(zip_path)
+    print(f'Removed zip file: "{zip_path}"')
     return folder_path
