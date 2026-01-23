@@ -3,6 +3,6 @@
 .vscode
 .venv
 
-data/
+dataset_3d/
 pretrained/
 trained/

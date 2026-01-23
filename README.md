@@ -121,6 +121,8 @@ project_root/
 
 All shell commands below use the hyperparameters from the final trained model. These can be adjusted to experiment with different configurations.
 
+> **Configuration Note**: Many parameters have default values hardcoded in the configuration files (`Diffusion_model/config.py`, `VAE_model/config/vae.py`). You can override any of these defaults by passing the corresponding command-line argument with `--parameter-name`. For example, `--learning-rate 1e-4`, `--batch-size 4`, or `--features 32 64 128 256`. See the config files for a complete list of available parameters.
+
 > **Note**: On Windows PowerShell, use backticks (`` ` ``) for line continuation. On Linux/macOS, use backslashes (`\`).
 
 #### A. Data Requirements
@@ -205,6 +207,8 @@ python train.py `
 - `--in-channels 17`: Microstructure (1) + 2D velocity latent (8) + timestep embedding (8) = 17
 - `--out-channels 8`: Must match VAE latent channels
 - `--features`: U-Net depth (5 levels in this case)
+
+> **Tip**: The `config.py` file contains many additional configurable parameters (e.g., `--dropout`, `--weight-decay`, `--kernel-size`, `--padding-mode`). Any parameter can be customized by adding the corresponding `--parameter-name value` flag to the command.
 
 **Output**: Saves to `trained/{timestamp}_unet_latent-diffusion_[params]/` with:
 - `model.pt`: Final trained model weights
@@ -303,7 +307,7 @@ python Inference/inference.py `
   Diffusion_model/trained/[model_folder] `
   --vae-encoder-path VAE_model/trained/dual_vae_stage2_2d `
   --vae-decoder-path VAE_model/trained/dual_vae_stage1_3d `
-  --dataset-dir path/to/dataset_3d `
+  --dataset-dir ../dataset_3d `
   --index 0
 ```
 
