@@ -288,9 +288,9 @@ cd scripts
 ```
 ```bash
 python eval_testset_end2end.py `
-  --diffusion-model-path Diffusion_model/trained/[model_folder] `
-  --vae-encoder-path VAE_model/trained/dual_vae_stage2_2d `
-  --vae-decoder-path VAE_model/trained/dual_vae_stage1_3d `
+  --diffusion-model-path ../Diffusion_model/trained/[model_folder] `
+  --vae-encoder-path ../VAE_model/trained/dual_vae_stage2_2d `
+  --vae-decoder-path ../VAE_model/trained/dual_vae_stage1_3d `
   --dataset-dir ../dataset_3d `
   --sampler ddim `
   --steps 50
@@ -321,9 +321,9 @@ cd Inference
 ```
 ```bash
 python inference.py `
-  --diffusion-model-path Diffusion_model/trained/[model_folder] `
-  --vae-encoder-path VAE_model/trained/dual_vae_stage2_2d `
-  --vae-decoder-path VAE_model/trained/dual_vae_stage1_3d `
+  --diffusion-model-path ../Diffusion_model/trained/[model_folder] `
+  --vae-encoder-path ../VAE_model/trained/dual_vae_stage2_2d `
+  --vae-decoder-path ../VAE_model/trained/dual_vae_stage1_3d `
   --dataset-dir ../dataset_3d `
   --index 0
 ```
