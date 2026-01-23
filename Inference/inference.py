@@ -21,8 +21,8 @@ from Diffusion_model.utils.dataset import get_loader
 
 def main():
     parser = argparse.ArgumentParser(description="Inference for Microstructure Flow Prediction")
-    parser.add_argument('model_path', type=str, help='Path to the trained diffusion model (directory or .pt file)')
-    parser.add_argument('sample_path', type=str, nargs='?', default=None, help='Path to the input sample (.pt file). If not provided, uses a sample from the test set.')
+    parser.add_argument('--diffusion-model-path', type=str, required=True, help='Path to the trained diffusion model (directory or .pt file)')
+    parser.add_argument('--sample-path', type=str, default=None, help='Path to the input sample (.pt file). If not provided, uses a sample from the test set.')
     parser.add_argument('--vae-path', type=str, default=None, help='Path to the trained VAE model directory. If not provided, uses VAE path from model config.')
     parser.add_argument('--vae-encoder-path', type=str, default=None, help='Path to VAE encoder weights (E2D, e.g. Stage 2). Optional.')
     parser.add_argument('--vae-decoder-path', type=str, default=None, help='Path to VAE decoder weights (D3D/E3D, e.g. Stage 1). Optional.')
@@ -39,11 +39,11 @@ def main():
     # We use the helper function set_model which handles loading the VAE internally 
     # within LatentDiffusionPredictor logic based on config.
     
-    if os.path.isfile(args.model_path):
-        model_dir = os.path.dirname(args.model_path)
-        weights_file = args.model_path
+    if os.path.isfile(args.diffusion_model_path):
+        model_dir = os.path.dirname(args.diffusion_model_path)
+        weights_file = args.diffusion_diffusion_model_path
     else:
-        model_dir = args.model_path
+        model_dir = args.diffusion_model_path
         # Prefer best_model.pt over model.pt (model.pt may be corrupted or incomplete)
         best_model_path = os.path.join(model_dir, 'best_model.pt')
         model_path = os.path.join(model_dir, 'model.pt')

@@ -321,7 +321,7 @@ cd Inference
 ```
 ```bash
 python inference.py `
-  Diffusion_model/trained/[model_folder] `
+  --diffusion-model-path Diffusion_model/trained/[model_folder] `
   --vae-encoder-path VAE_model/trained/dual_vae_stage2_2d `
   --vae-decoder-path VAE_model/trained/dual_vae_stage1_3d `
   --dataset-dir ../dataset_3d `
@@ -342,7 +342,7 @@ cd VAE_model
 ```
 ```bash
 python inference_vae.py `
-  --model-path trained/dual_vae_stage2_2d `
+  --vae-path trained/dual_vae_stage2_2d `
   --dataset-dir ../dataset_3d `
   --index 0
 ```

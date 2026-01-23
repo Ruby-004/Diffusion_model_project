@@ -10,23 +10,23 @@ This script loads a trained VAE model and visualizes:
 Supports both standard VAE and Dual-Branch VAE models.
 
 Usage:
-    python inference_vae.py [vae_path] [options]
+    python inference_vae.py --vae-path [path] [options]
     
 Examples:
     # Standard VAE with first test sample
-    python inference_vae.py trained/vae_norm_8 --index 0
+    python inference_vae.py --vae-path trained/vae_norm_8 --index 0
     
     # Dual VAE Stage 1 (3D branch test)
-    python inference_vae.py trained/dual_vae_stage1_3d --mode 3d
+    python inference_vae.py --vae-path trained/dual_vae_stage1_3d --mode 3d
     
     # Dual VAE Stage 2 (2D branch test)
-    python inference_vae.py trained/dual_vae_stage2_2d --mode 2d
+    python inference_vae.py --vae-path trained/dual_vae_stage2_2d --mode 2d
     
     # Dual VAE cross-reconstruction (2D input -> 3D output)
-    python inference_vae.py trained/dual_vae_stage2_2d --mode cross
+    python inference_vae.py --vae-path trained/dual_vae_stage2_2d --mode cross
     
     # Custom dataset directory
-    python inference_vae.py trained/vae_norm_8 --dataset-dir path/to/dataset
+    python inference_vae.py --vae-path trained/vae_norm_8 --dataset-dir path/to/dataset
 """
 
 import argparse
@@ -563,7 +563,7 @@ def encode_decode(vae, velocity_normalized, model_type: str, mode: str, is_3d: t
 
 def main():
     parser = argparse.ArgumentParser(description="VAE Inference: Visualize Encoder/Decoder")
-    parser.add_argument('vae_path', type=str, nargs='?', default='trained/vae_norm_8',
+    parser.add_argument('--vae-path', type=str, default='trained/vae_norm_8',
                         help='Path to the trained VAE model directory')
     parser.add_argument('--dataset-dir', type=str, default=None,
                         help='Path to the dataset directory')
