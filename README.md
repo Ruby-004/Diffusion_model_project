@@ -4,7 +4,7 @@ This project implements a machine learning pipeline for predicting **3D resin fl
 
 **Key idea**: Given a 2D velocity field (where the vertical component $v_z = 0$), the model predicts the full 3D velocity field with realistic vertical flow components.
 
-⚠️**Disclaimer**⚠️: This model is trained on CFD simulations that relies in several physical assumptions. With the added model errors, this model doesn't guarantee 100% fidelity in representation of real life flow phenomena. When applied in industry, the model should be used only as a supplementary tool and validated through additional testing.
+**Disclaimer**: This model is trained on CFD simulations that relies in several physical assumptions. With the added model errors, this model doesn't guarantee 100% fidelity in representation of real life flow phenomena. When applied in industry, the model should be used only as a supplementary tool and validated through additional testing.
 
 ## Table of Contents
 
@@ -61,7 +61,7 @@ pip install -r requirements.txt
 python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
 ```
 
-### Important: Working Directory
+### ⚠️Important: Working Directory⚠️
 
 **All commands in this README assume you are in the project root directory** (`Diffusion_model_project/`).
 
