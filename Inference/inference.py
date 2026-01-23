@@ -26,7 +26,7 @@ def main():
     parser.add_argument('--vae-path', type=str, default=None, help='Path to the trained VAE model directory. If not provided, uses VAE path from model config.')
     parser.add_argument('--vae-encoder-path', type=str, default=None, help='Path to VAE encoder weights (E2D, e.g. Stage 2). Optional.')
     parser.add_argument('--vae-decoder-path', type=str, default=None, help='Path to VAE decoder weights (D3D/E3D, e.g. Stage 1). Optional.')
-    parser.add_argument('--dataset-dir', type=str, default=None, help='Path to the dataset directory (overrides config). Used to locate statistics.json and test samples.')
+    parser.add_argument('--dataset-dir', type=str, default=os.path.join(current_dir, '..', 'dataset_3d'), help='Path to the dataset directory. Used to locate statistics.json and test samples. Default: ../dataset_3d')
     parser.add_argument('--index', type=int, default=0, help='Index of the sample in the test set to use (only if sample_path is not provided). Default: 0')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu', help='Device to use')
     
@@ -67,30 +67,27 @@ def main():
             config = log_try 
 
     predictor_kwargs = config['training']['predictor']
-    dataset_root = config['dataset']['root_dir']
-    # Override dataset root if provided via command line
-    if args.dataset_dir:
-        # Convert relative path to absolute path
-        dataset_root = os.path.abspath(args.dataset_dir)
     
-    # Locate statistics.json for normalization
-    # Priorities: 1. Dataset root from config/argsn
-    # Priorities: 1. Dataset root from config, 2. Default data path, 3. Sample directory (if provided)
-    norm_file = None
-    if os.path.exists(os.path.join(dataset_root, 'statistics.json')):
-        norm_file = os.path.join(dataset_root, 'statistics.json')
-    elif os.path.exists(os.path.join(project_root, 'Diffusion_model', 'data', 'dataset', 'statistics.json')):
-        norm_file = os.path.join(project_root, 'Diffusion_model', 'data', 'dataset', 'statistics.json')
-    elif args.sample_path is not None:
-        # Only try sample directory if sample_path was provided
-        sample_dir_norm = os.path.join(os.path.dirname(args.sample_path), 'statistics.json')
-        if os.path.exists(sample_dir_norm):
-            norm_file = sample_dir_norm
+    # Dataset directory - defaults to ../dataset_3d relative to Inference folder
+    dataset_root = os.path.abspath(args.dataset_dir)
+    print(f"Dataset directory: {dataset_root}")
     
-    if norm_file is None:
-        print("Warning: statistics.json not found. Fallback to None (may cause errors).")
-    else:
-        print(f"Using statistics from: {norm_file}")
+    # Load statistics.json for normalization from dataset directory
+    norm_file = os.path.join(dataset_root, 'statistics.json')
+    if not os.path.exists(norm_file):
+        # Show what files exist in the directory for debugging
+        if os.path.exists(dataset_root):
+            files = os.listdir(dataset_root)
+            raise FileNotFoundError(
+                f"statistics.json not found in {dataset_root}\n"
+                f"Files in directory: {files}"
+            )
+        else:
+            raise FileNotFoundError(
+                f"Dataset directory does not exist: {dataset_root}\n"
+                f"Please provide --dataset-dir pointing to the dataset folder."
+            )
+    print(f"Using statistics from: {norm_file}")
             
     # Fix VAE path in config if it was absolute path from another machine
 

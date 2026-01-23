@@ -61,6 +61,16 @@ pip install -r requirements.txt
 python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
 ```
 
+### Important: Working Directory
+
+**All commands in this README assume you are in the project root directory** (`Diffusion_model_project/`).
+
+If you navigate into a subdirectory (e.g., `cd Diffusion_model` or `cd Inference`), return to the project root before running commands:
+
+```bash
+cd ..
+```
+
 ## Steps to Reproduce Results
 
 ### 1. Download Pre-trained Models and Dataset
@@ -157,6 +167,9 @@ python train_3d_vae_only.py `
 This loads the Stage 1 checkpoint and trains the 2D components with latent alignment and cross-reconstruction losses.
 
 ```bash
+cd VAE_model
+```
+```bash
 python train_2d_with_cross.py `
   --dataset-dir ../dataset_3d `
   --save-dir trained/dual_vae_stage2_2d `
@@ -180,7 +193,6 @@ python train_2d_with_cross.py `
 The dataset loader uses a hardcoded **seed=2024** for the **70/15/15** train/validation/test split, ensuring the same samples are used across VAE training, diffusion training, and inference. This prevents data leakage (i.e., the diffusion model never trains on samples the VAE hasn't seen during training).
 
 ```bash
-cd ..
 cd Diffusion_model
 ```
 ```bash
@@ -272,8 +284,10 @@ python evaluate.py trained/[timestamp]_unet_latent-diffusion_[params]
 For detailed metrics including per-component errors and physical consistency measures:
 
 ```bash
-cd ..
-python scripts/eval_testset_end2end.py `
+cd scripts
+```
+```bash
+python eval_testset_end2end.py `
   --diffusion-model-path Diffusion_model/trained/[model_folder] `
   --vae-encoder-path VAE_model/trained/dual_vae_stage2_2d `
   --vae-decoder-path VAE_model/trained/dual_vae_stage1_3d `
@@ -303,7 +317,10 @@ python scripts/eval_testset_end2end.py `
 **Single-sample prediction:**
 
 ```bash
-python Inference/inference.py `
+cd Inference
+```
+```bash
+python inference.py `
   Diffusion_model/trained/[model_folder] `
   --vae-encoder-path VAE_model/trained/dual_vae_stage2_2d `
   --vae-decoder-path VAE_model/trained/dual_vae_stage1_3d `
@@ -340,23 +357,26 @@ Displays:
 **Plot diffusion model training loss:**
 
 ```bash
-cd ..
 cd Diffusion_model
+cd scripts
 ```
 ```bash
-python scripts/plot_loss.py trained/[model_folder]
+python plot_loss.py trained/[model_folder]
 ```
 
 **Plot physics metrics** (if physics-informed training was used):
 
 ```bash
-python scripts/plot_physics_metrics.py trained/[model_folder]
+cd Diffusion_model
+cd scripts
+```
+```bash
+python plot_physics_metrics.py trained/[model_folder]
 ```
 
 **Plot VAE training loss:**
 
 ```bash
-cd ..
 cd VAE_model
 ```
 ```bash
