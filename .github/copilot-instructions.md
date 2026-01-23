@@ -281,10 +281,11 @@ python -m scripts.eval_micrograph --micrograph-dir path/to/micrographs \
 
 ## External Dependencies
 
-- **Dataset**: Auto-downloaded from [Zenodo 16940478](https://doi.org/10.5281/zenodo.16940478) (square microstructures)
-- **Pre-trained models**: [Zenodo 17306446](https://doi.org/10.5281/zenodo.17306446)
-- **Micrograph benchmark**: [Zenodo 6611926](https://doi.org/10.5281/zenodo.6611926) - requires manual access request
-- **Zenodo utilities** (`utils/zenodo.py`): Handles downloads, unzipping, URL detection
+- **Dataset & Pre-trained models**: All hosted at [Zenodo 18341260](https://doi.org/10.5281/zenodo.18341260)
+  - `dataset_3d.zip` - Dataset (auto-downloaded if missing)
+  - `VAE's.zip` - Pre-trained VAE models
+  - Diffusion model checkpoint
+- **Zenodo utilities** (`utils/zenodo.py`): Handles downloads, unzipping, URL detection. Contains URL constants for all downloadable files.
 
 ## Development Notes
 

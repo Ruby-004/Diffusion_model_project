@@ -252,7 +252,7 @@ class Predictor(ABC, nn.Module):
     @classmethod
     def from_url(cls, url: str, device: str) -> 'Predictor':
         """
-        Load trained ML model from URL. Pre-trained models are hosted here: https://doi.org/10.5281/zenodo.17306446.
+        Load trained ML model from URL. Pre-trained models are hosted here: https://doi.org/10.5281/zenodo.18341260.
         
         Args:
             url: URL pointing to a zipped folder containing `model.pt` and `log.json` files created during training.

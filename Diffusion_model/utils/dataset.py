@@ -46,7 +46,9 @@ class MicroFlowDataset(Dataset):
             data: optional dictionary of data tensors (if provided, skips loading from disk).
             save_stats: whether to save statistics to json file.
         """
-        self._download_url = 'https://zenodo.org/records/16940478/files/dataset.zip?download=1'
+        # Import Zenodo URL from zenodo module
+        from .zenodo import DATASET_URL
+        self._download_url = DATASET_URL
 
         self.root_dir = root_dir
         self.augment = augment

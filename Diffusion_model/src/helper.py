@@ -320,12 +320,15 @@ def run_epoch(
             if velocity_loss_primary:
                 # Use per-channel velocity loss as primary
                 # Reconstruct velocity from noise prediction
+                # Use correct decoder method based on VAE type
+                vae_decoder = predictor.vae.decode_3d if predictor.vae_is_dual else predictor.vae.decode
+                
                 velocity_pred = reconstruct_velocity_from_noise_pred(
                     noise_pred=preds,
                     x_t=x_t,
                     t=t,
                     scheduler=predictor.scheduler,
-                    vae_decoder=predictor.vae.decode,
+                    vae_decoder=vae_decoder,
                     normalizer_output=predictor.normalizer['output'],
                     batch_size=batch_size,
                     latent_depth=latent_depth,
@@ -366,12 +369,15 @@ def run_epoch(
                     if velocity_loss_primary:
                         velocity_pred_for_physics = velocity_pred
                     else:
+                        # Use correct decoder method based on VAE type
+                        vae_decoder = predictor.vae.decode_3d if predictor.vae_is_dual else predictor.vae.decode
+                        
                         velocity_pred_for_physics = reconstruct_velocity_from_noise_pred(
                             noise_pred=preds,
                             x_t=x_t,
                             t=t,
                             scheduler=predictor.scheduler,
-                            vae_decoder=predictor.vae.decode,
+                            vae_decoder=vae_decoder,
                             normalizer_output=predictor.normalizer['output'],
                             batch_size=batch_size,
                             latent_depth=latent_depth,
@@ -502,12 +508,15 @@ def run_epoch(
                         )
                         x_t = predictor.scheduler.q_sample(target_latents_flat, t, noise_flat)
                         
+                        # Use correct decoder method based on VAE type
+                        vae_decoder = predictor.vae.decode_3d if predictor.vae_is_dual else predictor.vae.decode
+                        
                         velocity_pred = reconstruct_velocity_from_noise_pred(
                             noise_pred=preds,
                             x_t=x_t,
                             t=t,
                             scheduler=predictor.scheduler,
-                            vae_decoder=predictor.vae.decode,
+                            vae_decoder=vae_decoder,
                             normalizer_output=predictor.normalizer['output'],
                             batch_size=batch_size,
                             latent_depth=latent_depth,

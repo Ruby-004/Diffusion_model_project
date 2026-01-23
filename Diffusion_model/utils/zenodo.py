@@ -8,6 +8,20 @@ import zipfile
 from tqdm import tqdm
 
 
+# Zenodo URLs for dataset and pre-trained models
+# All files are hosted at: https://zenodo.org/records/18341260
+ZENODO_RECORD_ID = "18341260"
+ZENODO_BASE_URL = f"https://zenodo.org/records/{ZENODO_RECORD_ID}/files"
+
+# Download URLs
+DATASET_URL = f"{ZENODO_BASE_URL}/dataset_3d.zip?download=1"
+VAE_MODELS_URL = f"{ZENODO_BASE_URL}/VAE%27s.zip?download=1"
+DIFFUSION_MODEL_URL = f"{ZENODO_BASE_URL}/20260120_unet_latent-diffusion_in-17-out-8-f-5-k-3-p-zeros-a-3..2-dr-0.0-wd-0.00e%2B00-b-2-lr-1.00e-03-ep-104.zip?download=1"
+
+# DOI for citation
+ZENODO_DOI = "10.5281/zenodo.18341260"
+
+
 user_agents = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
@@ -92,10 +106,58 @@ def get_zip_filename(link: str) -> str:
     Get the zip filename from a zenodo download link.
 
     Args:
-        link: zenodo download link that is like 'https://zenodo.org/records/16940478/files/simulations.zip?download=1'
+        link: zenodo download link that is like 'https://zenodo.org/records/18341260/files/dataset_3d.zip?download=1'
     
     Returns:
-        out: zip filename, i.e., 'simulations.zip'.
+        out: zip filename, i.e., 'dataset_3d.zip'.
     """
     out = link.split('/')[-1].split('?')[0]
     return out
+
+
+def download_dataset(save_dir: str = "./dataset_3d") -> str:
+    """
+    Download the dataset from Zenodo and extract it.
+    
+    Args:
+        save_dir: Directory where dataset will be extracted to.
+        
+    Returns:
+        Path to the extracted dataset folder.
+    """
+    parent_dir = osp.dirname(osp.abspath(save_dir))
+    zip_path = download_data(DATASET_URL, parent_dir)
+    folder_path = unzip_data(zip_path, parent_dir)
+    return folder_path
+
+
+def download_vae_models(save_dir: str = "./VAE_model/trained") -> str:
+    """
+    Download the pre-trained VAE models from Zenodo and extract them.
+    
+    Args:
+        save_dir: Directory where VAE models will be extracted to.
+        
+    Returns:
+        Path to the extracted folder.
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    zip_path = download_data(VAE_MODELS_URL, save_dir)
+    folder_path = unzip_data(zip_path, save_dir)
+    return folder_path
+
+
+def download_diffusion_model(save_dir: str = "./Diffusion_model/trained") -> str:
+    """
+    Download the pre-trained diffusion model from Zenodo and extract it.
+    
+    Args:
+        save_dir: Directory where diffusion model will be extracted to.
+        
+    Returns:
+        Path to the extracted folder.
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    zip_path = download_data(DIFFUSION_MODEL_URL, save_dir)
+    folder_path = unzip_data(zip_path, save_dir)
+    return folder_path

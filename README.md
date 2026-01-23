@@ -24,7 +24,7 @@ This project implements a machine learning pipeline for predicting **3D resin fl
 
 ```bash
 # Clone repository
-git clone <repository-url>
+git clone https://github.com/Ruby-004/Diffusion_model_project.git
 cd Diffusion_model_project
 
 # Create virtual environment with Python 3.11
@@ -52,21 +52,22 @@ python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA av
 
 ### 1. Download Pre-trained Models and Dataset
 
-Pre-trained models and the dataset are hosted on Zenodo.
+Pre-trained models and the dataset are hosted on Zenodo: [**https://doi.org/10.5281/zenodo.18341260**](https://doi.org/10.5281/zenodo.18341260)
 
 **Downloads:**
 
-1. **Dataset** (required for training and evaluation):
-   - Download from [Zenodo Record](https://doi.org/10.5281/zenodo.16940478)
-   - Extract to a directory of your choice (e.g., `data/dataset_3d/`)
+All files are available from the same Zenodo record:
 
-2. **VAE Model** (required for latent diffusion):
-   - Download from [Zenodo Record](https://doi.org/10.5281/zenodo.16940478)
-   - Extract Stage 1 checkpoint to `VAE_model/trained/dual_vae_stage1_3d/`
-   - Extract Stage 2 checkpoint to `VAE_model/trained/dual_vae_stage2_2d/`
+1. **Dataset** (`dataset_3d.zip`, ~2.1 GB) - required for training and evaluation:
+   - **Automatic**: Simply run any training script with an empty/non-existent `--dataset-dir` or `--root-dir` path, and the dataset will download automatically
+   - **Manual**: Download from [Zenodo Record](https://zenodo.org/records/18341260/files/dataset_3d.zip?download=1) and extract to your preferred location (e.g., `./dataset_3d`)
 
-3. **Diffusion Model** (for inference only, optional):
-   - Download from [Zenodo Record](https://doi.org/10.5281/zenodo.17306446)
+2. **VAE Models** (`VAE's.zip`, ~1.7 GB) - required for latent diffusion:
+   - Download from [Zenodo Record](https://zenodo.org/records/18341260/files/VAE%27s.zip?download=1)
+   - Extract to `VAE_model/trained/` (creates `dual_vae_stage1_3d/` and `dual_vae_stage2_2d/` folders)
+
+3. **Diffusion Model** (`20260120_unet_latent-diffusion_...zip`, ~2.2 GB) - for inference only, optional:
+   - Download from [Zenodo Record](https://zenodo.org/records/18341260/files/20260120_unet_latent-diffusion_in-17-out-8-f-5-k-3-p-zeros-a-3..2-dr-0.0-wd-0.00e%2B00-b-2-lr-1.00e-03-ep-104.zip?download=1)
    - Extract to `Diffusion_model/trained/`
 
 #### Directory Structure After Download
@@ -122,7 +123,7 @@ All dataset loaders use a hardcoded **seed=2024** for the **70/15/15** train/val
 ```bash
 cd VAE_model
 python train_3d_vae_only.py `
-  --dataset-dir ../path/to/dataset_3d `
+  --dataset-dir ../dataset_3d `
   --save-dir trained/dual_vae_stage1_3d `
   --in-channels 3 `
   --latent-channels 8 `
@@ -132,13 +133,15 @@ python train_3d_vae_only.py `
   --per-component-norm
 ```
 
+> **Note**: If `--dataset-dir` points to an empty or non-existent directory, the dataset will be **automatically downloaded** from Zenodo and extracted to that location.
+
 **Stage 2: Train 2D VAE (Encoder E2D + Decoder D2D) with Alignment**
 
 This loads the Stage 1 checkpoint and trains the 2D components with latent alignment and cross-reconstruction losses.
 
 ```bash
 python train_2d_with_cross.py `
-  --dataset-dir ../path/to/dataset_3d `
+  --dataset-dir ../dataset_3d `
   --save-dir trained/dual_vae_stage2_2d `
   --stage1-checkpoint trained/dual_vae_stage1_3d `
   --in-channels 3 `
@@ -160,9 +163,10 @@ python train_2d_with_cross.py `
 The dataset loader uses a hardcoded **seed=2024** for the **70/15/15** train/validation/test split, ensuring the same samples are used across VAE training, diffusion training, and inference. This prevents data leakage (i.e., the diffusion model never trains on samples the VAE hasn't seen during training).
 
 ```bash
+cd ..
 cd Diffusion_model
 python train.py `
-  --root-dir ../path/to/dataset_3d `
+  --root-dir ../dataset_3d `
   --vae-encoder-path ../VAE_model/trained/dual_vae_stage2_2d `
   --vae-decoder-path ../VAE_model/trained/dual_vae_stage1_3d `
   --predictor-type latent-diffusion `
@@ -174,9 +178,11 @@ python train.py `
   --learning-rate 1e-3 `
   --weight-decay 0 `
   --use-3d True `
-  --num-slices 11
+  --num-slices 11 `
   --attention '3..2'
 ```
+
+> **Auto-Download**: If `--root-dir` points to an empty or non-existent directory, the dataset (~2.1 GB) will be **automatically downloaded** from Zenodo to that location. You can start training immediately without manual download.
 
 **Key parameters:**
 - `--in-channels 17`: Microstructure (1) + 2D velocity latent (8) + timestep embedding (8) = 17
@@ -209,7 +215,7 @@ To run the grid search:
 ```bash
 cd Diffusion_model
 python gridsearch_diffusion.py `
-  --root-dir ../path/to/dataset_3d `
+  --root-dir ../dataset_3d `
   --vae-encoder-path ../VAE_model/trained/dual_vae_stage2_2d `
   --vae-decoder-path ../VAE_model/trained/dual_vae_stage1_3d `
   --output-dir ./trained/gridsearch/ `
@@ -241,11 +247,12 @@ python evaluate.py trained/[timestamp]_unet_latent-diffusion_[params]
 For detailed metrics including per-component errors and physical consistency measures:
 
 ```bash
+cd ..
 python scripts/eval_testset_end2end.py `
   --diffusion-model-path Diffusion_model/trained/[model_folder] `
   --vae-encoder-path VAE_model/trained/dual_vae_stage2_2d `
   --vae-decoder-path VAE_model/trained/dual_vae_stage1_3d `
-  --dataset-dir path/to/dataset_3d `
+  --dataset-dir ../dataset_3d `
   --sampler ddim `
   --steps 50
 ```
@@ -292,7 +299,7 @@ python Inference/inference.py `
 cd VAE_model
 python inference_vae.py `
   --model-path trained/dual_vae_stage2_2d `
-  --dataset-dir ../path/to/dataset_3d `
+  --dataset-dir ../dataset_3d `
   --index 0
 ```
 
@@ -306,6 +313,7 @@ Displays:
 **Plot diffusion model training loss:**
 
 ```bash
+cd ..
 cd Diffusion_model
 python scripts/plot_loss.py trained/[model_folder]
 ```
@@ -319,6 +327,7 @@ python scripts/plot_physics_metrics.py trained/[model_folder]
 **Plot VAE training loss:**
 
 ```bash
+cd ..
 cd VAE_model
 python plot_vae_loss.py trained/dual_vae_stage1_3d
 
