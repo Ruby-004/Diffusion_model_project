@@ -70,8 +70,8 @@ def main():
     dataset_root = config['dataset']['root_dir']
     # Override dataset root if provided via command line
     if args.dataset_dir:
-        dataset_root = args.dataset_dir
-        print(f"Using dataset directory from command-line argument: {dataset_root}")
+        # Convert relative path to absolute path
+        dataset_root = os.path.abspath(args.dataset_dir)
     
     # Locate statistics.json for normalization
     # Priorities: 1. Dataset root from config/argsn
