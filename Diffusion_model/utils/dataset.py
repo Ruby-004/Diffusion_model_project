@@ -231,16 +231,27 @@ class MicroFlowDataset(Dataset):
         # 2. Unzip data
         folder_path = unzip_data(zip_path=zip_path, save_dir=save_dir)
         
-        # 3. Move folder
-        dest_path = self.root_dir
-        try:
-            shutil.move(folder_path, dest_path)
-            print(f'Moved "{folder_path}" to "{dest_path}".')
+        # 3. Move folder if needed
+        dest_path = osp.abspath(self.root_dir)
+        extracted_path = osp.abspath(folder_path)
+        
+        if extracted_path == dest_path:
+            # Already in the correct location
+            print(f'Dataset extracted to correct location: "{dest_path}".')
+        else:
+            # Need to move to desired location
+            try:
+                # Remove empty destination if it exists
+                if osp.exists(dest_path) and not os.listdir(dest_path):
+                    os.rmdir(dest_path)
+                
+                shutil.move(extracted_path, dest_path)
+                print(f'Moved "{extracted_path}" to "{dest_path}".')
 
-        except shutil.Error as e:
-            print(f"Error during move operation: {e}")
-        except FileNotFoundError:
-            print(f"Destination path not found. Make sure the parent directory exists.")
+            except shutil.Error as e:
+                print(f"Error during move operation: {e}")
+            except FileNotFoundError:
+                print(f"Destination path not found. Make sure the parent directory exists.")
     
 
     def __len__(self):
