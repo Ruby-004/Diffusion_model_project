@@ -472,13 +472,13 @@ Stage 4: Inference Phase: New predictions are generated (from random noise → i
 | 2 | E2D + D2D | Reconstruct 2D fields + align latents with E3D + cross-reconstruct via D3D |
 
 **Stage 2 Loss Function**:
-$$L = L_{\text{rec\_2d}} + L_{\text{rec\_3d}} + \lambda_{\text{align}} \cdot L_{\text{align}} + \lambda_{\text{cross}} \cdot L_{\text{cross}} + \beta_{\text{kl}} \cdot KL$$
+$$L = L_{\text{rec-2d}} + L_{\text{rec-3d}} + \lambda_{\text{align}} \cdot L_{\text{align}} + \lambda_{\text{cross}} \cdot L_{\text{cross}} + \beta_{\text{kl}} \cdot KL$$
 
 **Loss Terms:**
 | Term | Description |
 |------|-------------|
-| $L_{\text{rec\_2d}}$ | MSE between original and reconstructed 2D velocity |
-| $L_{\text{rec\_3d}}$ | MSE between original and reconstructed 3D velocity |
+| $L_{\text{rec-2d}}$ | MSE between original and reconstructed 2D velocity |
+| $L_{\text{rec-3d}}$ | MSE between original and reconstructed 3D velocity |
 | $L_{\text{align}}$ | MSE between E2D and E3D latent representations (paired samples) |
 | $L_{\text{cross}}$ | MSE between ground truth 3D and D3D(E2D(2D input)) |
 | $KL$ | KL divergence (sum of 2D and 3D terms) |
@@ -529,7 +529,7 @@ Inference:
 |------|-----------|-------------|
 | Divergence | `--lambda-div` | Enforces $\nabla \cdot \mathbf{u} = 0$ (mass conservation) |
 | Flow-rate | `--lambda-flow` | Penalizes variation in volumetric flow rate $Q(x)$ |
-| No-slip | `--lambda-bc` | Enforces $\mathbf{u} = 0$ in solid regions |
+| No-slip | `--lambda-laplacian` | Enforces $\mathbf{u} = 0$ in solid regions |
 | Smoothness | `--lambda-smooth` | Tikhonov regularization for stable gradients |
 
 **Implementation details**:
