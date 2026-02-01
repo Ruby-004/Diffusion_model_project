@@ -618,11 +618,8 @@ def main():
             preds = preds * mask
             targets = targets * mask
             
-            # Per-channel loss: computes MAE separately for u, v, w then averages
-            if args.normalized_mae_per_channel:
-                reconstruction_loss = normalized_mae_loss_per_channel(preds, targets, mask=mask)
-            else:
-                reconstruction_loss = mae_loss_per_channel(preds, targets, mask=mask)
+            # Use selected reconstruction loss function (same as training)
+            reconstruction_loss = reconstruction_loss_fn(preds, targets, mask=mask)
             kl_loss = kl_divergence(mu=mean, logvar=logvar)
             
             num_2d = is_2d.sum().item()

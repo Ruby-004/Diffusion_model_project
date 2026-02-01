@@ -7,7 +7,7 @@ parser.add_argument(
     '--dataset-dir',
     type=str,
     # required=True,
-    default='C:/Users/alexd/Downloads/dataset_3d',
+    default='../dataset_3d',
     help='Directory for dataset.'
 )
 parser.add_argument(
