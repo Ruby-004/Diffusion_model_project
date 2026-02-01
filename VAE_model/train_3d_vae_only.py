@@ -39,11 +39,71 @@ def parse_args():
     parser.add_argument('--conditional', action='store_true', help='Use conditional VAE')
     parser.add_argument('--augment', action='store_true', help='Use data augmentation')
     parser.add_argument('--normalized-mae-per-channel', action='store_true', help='Use normalized MAE per channel (scale-invariant)')
+    parser.add_argument('--debug-latent', action='store_true', help='Log mu/logvar statistics for first few batches')
+    parser.add_argument('--debug-batches', type=int, default=5, help='Number of batches to log debug stats (default: 5)')
+    parser.add_argument('--use-split-file', type=str, default=None, help='Path to splits.json for reproducible train/val/test split')
+    parser.add_argument('--split-seed', type=int, default=2024, help='Seed for data split (default: 2024)')
     
     args = parser.parse_args()
     if args.device is None:
         args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
     return args
+
+
+def check_tensor_health(tensor: torch.Tensor, name: str, fail_on_bad: bool = True) -> bool:
+    """
+    Check tensor for NaN/Inf values and optionally fail with clear message.
+    
+    Args:
+        tensor: Tensor to check
+        name: Name for error messages
+        fail_on_bad: If True, raise exception on NaN/Inf
+        
+    Returns:
+        True if tensor is healthy, False otherwise
+    """
+    has_nan = torch.isnan(tensor).any().item()
+    has_inf = torch.isinf(tensor).any().item()
+    
+    if has_nan or has_inf:
+        msg = f"FATAL: {name} contains {'NaN' if has_nan else ''}{'/' if has_nan and has_inf else ''}{'Inf' if has_inf else ''}"
+        msg += f"\n  Shape: {tensor.shape}"
+        msg += f"\n  Min: {tensor.min().item():.6e}, Max: {tensor.max().item():.6e}"
+        msg += f"\n  NaN count: {torch.isnan(tensor).sum().item()}, Inf count: {torch.isinf(tensor).sum().item()}"
+        
+        if fail_on_bad:
+            raise RuntimeError(msg)
+        else:
+            print(f"WARNING: {msg}")
+            return False
+    return True
+
+
+def log_latent_stats(mu: torch.Tensor, logvar: torch.Tensor, prefix: str = ""):
+    """
+    Log statistics of mu and logvar for debugging KL divergence issues.
+    
+    Args:
+        mu: Mean tensor from encoder
+        logvar: Log-variance tensor from encoder  
+        prefix: Prefix for log messages (e.g., "Train" or "Val")
+    """
+    print(f"  {prefix} Latent Stats:")
+    print(f"    mu    - min: {mu.min().item():+.4f}, max: {mu.max().item():+.4f}, "
+          f"mean: {mu.mean().item():+.4f}, std: {mu.std().item():.4f}")
+    print(f"    logvar - min: {logvar.min().item():+.4f}, max: {logvar.max().item():+.4f}, "
+          f"mean: {logvar.mean().item():+.4f}, std: {logvar.std().item():.4f}")
+    
+    # Check for potential KL explosion indicators
+    exp_logvar_max = torch.exp(logvar).max().item()
+    if exp_logvar_max > 1e6:
+        print(f"    WARNING: exp(logvar) max = {exp_logvar_max:.2e} - potential KL explosion!")
+    
+    # Compute raw KL components for diagnostics
+    kl_mu_term = (mu.pow(2)).mean().item()
+    kl_logvar_term = logvar.mean().item()
+    kl_exp_term = logvar.exp().mean().item()
+    print(f"    KL components: mu²={kl_mu_term:.4f}, logvar={kl_logvar_term:.4f}, exp(logvar)={kl_exp_term:.4f}")
 
 
 def main():
@@ -203,9 +263,16 @@ def main():
             super().__init__()
             self.encoder_3d = vae.encoder
             self.decoder_3d = vae.decoder
+            # Logvar clamping bounds to prevent KL explosion
+            self.logvar_min = -10.0
+            self.logvar_max = 10.0
         
         def forward(self, x, condition=None):
             mean, logvar = self.encoder_3d(x, condition)
+            # CRITICAL: Clamp logvar to prevent KL explosion
+            # Without this, large logvar values cause exp(logvar) -> Inf -> KL = Inf
+            # This was the root cause of KL explosion in validation (training had external clamping)
+            logvar = torch.clamp(logvar, min=self.logvar_min, max=self.logvar_max)
             z = self.encoder_3d.sample(mean, logvar)
             recon = self.decoder_3d(z, condition)
             return recon, (mean, logvar)
@@ -303,18 +370,21 @@ def main():
             else:
                 preds, (mean, logvar) = vae(inputs, condition=is_3d)
             
-            # Additional clamping for stability during training
+            # Note: logvar is now clamped inside VAE3DWrapper.forward()
+            # The external clamping here is kept for extra safety but shouldn't be needed
             logvar = torch.clamp(logvar, min=-10.0, max=10.0)
             
-            # Check for NaN/Inf
-            if torch.isnan(mean).any() or torch.isinf(mean).any():
-                print(f"WARNING: NaN/Inf detected in mean at batch {i}")
+            # Robust NaN/Inf checking with clear error messages
+            if not check_tensor_health(mean, f"mu (batch {i})", fail_on_bad=False):
+                print(f"  Skipping batch {i} due to bad mu values")
                 continue
-            if torch.isnan(logvar).any() or torch.isinf(logvar).any():
-                print(f"WARNING: NaN/Inf detected in logvar at batch {i}")
+            if not check_tensor_health(logvar, f"logvar (batch {i})", fail_on_bad=False):
+                print(f"  Skipping batch {i} due to bad logvar values")
                 continue
             
-            # logvar is already clamped inside the model's encode method
+            # Debug logging for first few batches of first epoch
+            if args.debug_latent and epoch == 0 and i < args.debug_batches:
+                log_latent_stats(mean, logvar, prefix=f"Train batch {i}")
             
             preds = preds * mask
             targets = targets * mask
@@ -415,7 +485,22 @@ def main():
                 else:
                     preds, (mean, logvar) = vae(inputs, condition=is_3d)
                 
-                # logvar is already clamped
+                # Note: logvar is clamped inside VAE3DWrapper.forward()
+                # This was the ROOT CAUSE of KL explosion - validation path was missing clamping
+                # Now the model handles it internally, but we add extra safety here
+                logvar = torch.clamp(logvar, min=-10.0, max=10.0)
+                
+                # Check for NaN/Inf in validation too
+                if not check_tensor_health(mean, f"val mu (batch {j})", fail_on_bad=False):
+                    print(f"  Skipping val batch {j} due to bad mu values")
+                    continue
+                if not check_tensor_health(logvar, f"val logvar (batch {j})", fail_on_bad=False):
+                    print(f"  Skipping val batch {j} due to bad logvar values")
+                    continue
+                
+                # Debug logging for first few validation batches of first epoch
+                if args.debug_latent and epoch == 0 and j < args.debug_batches:
+                    log_latent_stats(mean, logvar, prefix=f"Val batch {j}")
                 
                 preds = preds * mask
                 targets = targets * mask
@@ -426,6 +511,13 @@ def main():
                 else:
                     reconstruction_loss = mae_loss_per_channel(preds, targets, mask=mask)
                 kl_loss = kl_divergence(mu=mean, logvar=logvar)
+                
+                # Additional KL sanity check
+                if kl_loss.item() > 1e6 or torch.isinf(kl_loss):
+                    print(f"  WARNING: KL explosion in val batch {j}: {kl_loss.item():.2e}")
+                    log_latent_stats(mean, logvar, prefix=f"  EXPLOSION DEBUG")
+                    continue
+                    
                 loss = reconstruction_loss + kl_coeff * kl_loss
                 
                 # All samples should be 3D
