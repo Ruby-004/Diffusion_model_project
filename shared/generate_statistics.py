@@ -119,14 +119,36 @@ def compute_velocity_statistics(
     for c_idx, c_name in enumerate(components):
         if is_3d:
             # Shape: (N, slices, 3, H, W) -> select channel c_idx
-            component = velocity_masked[:, :, c_idx, :, :]
+            component = velocity[:, :, c_idx, :, :]
         else:
-            component = velocity_masked[:, c_idx, :, :]
+            component = velocity[:, c_idx, :, :]
         
         # Basic stats
         pc_stats[f'max_{c_name}'] = component.abs().max().item()
-        pc_stats[f'mean_{c_name}'] = component.mean().item()
-        pc_stats[f'std_{c_name}'] = component.std().item()
+        
+        # Compute mean in fluid region only if mask available
+        if mask is not None:
+            if is_3d:
+                mask_comp = mask[:, :, 0, :, :]  # Take first channel of mask
+            else:
+                mask_comp = mask[:, 0, :, :]
+            
+            component_masked = component * mask_comp
+            # Mean only where mask=1 (fluid region)
+            mean_val = component_masked.abs().sum() / mask_comp.sum()
+            pc_stats[f'mean_{c_name}'] = mean_val.item()
+            
+            # Std in fluid region only
+            masked_vals = component_masked[mask_comp > 0.5]
+            if len(masked_vals) > 0:
+                pc_stats[f'std_{c_name}'] = masked_vals.std().item()
+            else:
+                pc_stats[f'std_{c_name}'] = 0.0
+        else:
+            # Fallback: global mean (includes solid regions with zeros)
+            pc_stats[f'mean_{c_name}'] = component.abs().mean().item()
+            pc_stats[f'std_{c_name}'] = component.std().item()
+        
         pc_stats[f'min_{c_name}'] = component.min().item()
         
         # Percentiles for robust normalization

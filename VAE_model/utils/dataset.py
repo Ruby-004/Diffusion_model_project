@@ -186,9 +186,12 @@ class MicroFlowDataset(Dataset):
     def _save_statistics(self):
         """
         Save dataset statistics including per-component velocity max values.
+        Mean values are computed ONLY in fluid regions (microstructure=1) to match
+        how the training loss is computed with masking.
         """
         velocity = self.data.get('velocity', torch.tensor(0.0))
         velocity_input = self.data.get('velocity_input', torch.tensor(0.0))
+        microstructure = self.data.get('microstructure', None)
         
         stats = {
             'U_2d': {
@@ -206,26 +209,50 @@ class MicroFlowDataset(Dataset):
         }
         
         # Add per-component max and mean values for velocity (critical for w-component training)
+        # Mean values computed ONLY in fluid region to match training loss computation
         # Velocity shape: (N, num_slices, 3, H, W) where channels are (vx, vy, vz)
         if velocity.numel() > 0 and velocity.dim() >= 3:
             stats['U_per_component'] = {
                 'max_u': velocity[:, :, 0, :, :].abs().max().item(),
                 'max_v': velocity[:, :, 1, :, :].abs().max().item(),
                 'max_w': velocity[:, :, 2, :, :].abs().max().item(),
-                'mean_u': velocity[:, :, 0, :, :].abs().mean().item(),
-                'mean_v': velocity[:, :, 1, :, :].abs().mean().item(),
-                'mean_w': velocity[:, :, 2, :, :].abs().mean().item(),
             }
+            
+            # Compute mean in fluid region only if mask available
+            if microstructure is not None:
+                # Microstructure shape: (N, num_slices, 1, H, W)
+                mask = microstructure.expand_as(velocity)  # (N, num_slices, 3, H, W)
+                for i, comp in enumerate(['u', 'v', 'w']):
+                    vel_comp = velocity[:, :, i, :, :]
+                    vel_masked = vel_comp * mask[:, :, i, :, :]
+                    # Mean only where mask=1
+                    mean_val = vel_masked.abs().sum() / mask[:, :, i, :, :].sum()
+                    stats['U_per_component'][f'mean_{comp}'] = mean_val.item()
+            else:
+                # Fallback: global mean (includes solid regions)
+                stats['U_per_component']['mean_u'] = velocity[:, :, 0, :, :].abs().mean().item()
+                stats['U_per_component']['mean_v'] = velocity[:, :, 1, :, :].abs().mean().item()
+                stats['U_per_component']['mean_w'] = velocity[:, :, 2, :, :].abs().mean().item()
         
         if velocity_input.numel() > 0 and velocity_input.dim() >= 3:
             stats['U_2d_per_component'] = {
                 'max_u': velocity_input[:, :, 0, :, :].abs().max().item(),
                 'max_v': velocity_input[:, :, 1, :, :].abs().max().item(),
                 'max_w': velocity_input[:, :, 2, :, :].abs().max().item(),
-                'mean_u': velocity_input[:, :, 0, :, :].abs().mean().item(),
-                'mean_v': velocity_input[:, :, 1, :, :].abs().mean().item(),
-                'mean_w': velocity_input[:, :, 2, :, :].abs().mean().item(),
             }
+            
+            # Compute mean in fluid region only if mask available
+            if microstructure is not None:
+                mask = microstructure.expand_as(velocity_input)
+                for i, comp in enumerate(['u', 'v', 'w']):
+                    vel_comp = velocity_input[:, :, i, :, :]
+                    vel_masked = vel_comp * mask[:, :, i, :, :]
+                    mean_val = vel_masked.abs().sum() / mask[:, :, i, :, :].sum()
+                    stats['U_2d_per_component'][f'mean_{comp}'] = mean_val.item()
+            else:
+                stats['U_2d_per_component']['mean_u'] = velocity_input[:, :, 0, :, :].abs().mean().item()
+                stats['U_2d_per_component']['mean_v'] = velocity_input[:, :, 1, :, :].abs().mean().item()
+                stats['U_2d_per_component']['mean_w'] = velocity_input[:, :, 2, :, :].abs().mean().item()
 
         # save
         log_file = osp.join(self.root_dir, 'statistics.json')
@@ -308,9 +335,13 @@ class MicroFlowDatasetVAE(Dataset):
         self._save_statistics()
     
     def _save_statistics(self):
-        """Save dataset statistics including per-component velocity max values."""
+        """Save dataset statistics including per-component velocity max and mean values.
+        Mean values are computed ONLY in fluid regions (microstructure=1) to match
+        how the training loss is computed with masking.
+        """
         velocity_2d = self.data.get('velocity_2d', torch.tensor(0.0))
         velocity_3d = self.data.get('velocity_3d', torch.tensor(0.0))
+        microstructure = self.data.get('microstructure', None)
         
         stats = {
             'U_2d': {
@@ -328,26 +359,50 @@ class MicroFlowDatasetVAE(Dataset):
         }
         
         # Add per-component max and mean values for velocity (critical for w-component training)
+        # Mean values computed ONLY in fluid region to match training loss computation
         # Velocity shape: (N, num_slices, 3, H, W) where channels are (vx, vy, vz)
         if velocity_3d.numel() > 0 and velocity_3d.dim() >= 3:
             stats['U_per_component'] = {
                 'max_u': velocity_3d[:, :, 0, :, :].abs().max().item(),
                 'max_v': velocity_3d[:, :, 1, :, :].abs().max().item(),
                 'max_w': velocity_3d[:, :, 2, :, :].abs().max().item(),
-                'mean_u': velocity_3d[:, :, 0, :, :].abs().mean().item(),
-                'mean_v': velocity_3d[:, :, 1, :, :].abs().mean().item(),
-                'mean_w': velocity_3d[:, :, 2, :, :].abs().mean().item(),
             }
+            
+            # Compute mean in fluid region only if mask available
+            if microstructure is not None:
+                # Microstructure shape: (N, num_slices, 1, H, W)
+                mask = microstructure.expand_as(velocity_3d)  # (N, num_slices, 3, H, W)
+                for i, comp in enumerate(['u', 'v', 'w']):
+                    vel_comp = velocity_3d[:, :, i, :, :]
+                    vel_masked = vel_comp * mask[:, :, i, :, :]
+                    # Mean only where mask=1
+                    mean_val = vel_masked.abs().sum() / mask[:, :, i, :, :].sum()
+                    stats['U_per_component'][f'mean_{comp}'] = mean_val.item()
+            else:
+                # Fallback: global mean (includes solid regions)
+                stats['U_per_component']['mean_u'] = velocity_3d[:, :, 0, :, :].abs().mean().item()
+                stats['U_per_component']['mean_v'] = velocity_3d[:, :, 1, :, :].abs().mean().item()
+                stats['U_per_component']['mean_w'] = velocity_3d[:, :, 2, :, :].abs().mean().item()
         
         if velocity_2d.numel() > 0 and velocity_2d.dim() >= 3:
             stats['U_2d_per_component'] = {
                 'max_u': velocity_2d[:, :, 0, :, :].abs().max().item(),
                 'max_v': velocity_2d[:, :, 1, :, :].abs().max().item(),
                 'max_w': velocity_2d[:, :, 2, :, :].abs().max().item(),
-                'mean_u': velocity_2d[:, :, 0, :, :].abs().mean().item(),
-                'mean_v': velocity_2d[:, :, 1, :, :].abs().mean().item(),
-                'mean_w': velocity_2d[:, :, 2, :, :].abs().mean().item(),
             }
+            
+            # Compute mean in fluid region only if mask available
+            if microstructure is not None:
+                mask = microstructure.expand_as(velocity_2d)
+                for i, comp in enumerate(['u', 'v', 'w']):
+                    vel_comp = velocity_2d[:, :, i, :, :]
+                    vel_masked = vel_comp * mask[:, :, i, :, :]
+                    mean_val = vel_masked.abs().sum() / mask[:, :, i, :, :].sum()
+                    stats['U_2d_per_component'][f'mean_{comp}'] = mean_val.item()
+            else:
+                stats['U_2d_per_component']['mean_u'] = velocity_2d[:, :, 0, :, :].abs().mean().item()
+                stats['U_2d_per_component']['mean_v'] = velocity_2d[:, :, 1, :, :].abs().mean().item()
+                stats['U_2d_per_component']['mean_w'] = velocity_2d[:, :, 2, :, :].abs().mean().item()
         
         # Save
         log_file = osp.join(self.root_dir, 'statistics.json')
