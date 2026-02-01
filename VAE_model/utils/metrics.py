@@ -165,6 +165,69 @@ def normalized_mae_loss_per_channel(
     return loss
 
 
+def normalized_mse_per_channel(
+    output: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor = None,
+    reduce: bool = True,
+    eps: float = 1e-8
+) -> torch.Tensor:
+    """
+    Normalized MSE computed per-channel for VAE training.
+    
+    Similar to normalized_mae_per_channel but uses squared error.
+    This penalizes larger errors more heavily than MAE.
+    
+    Args:
+        output: (B, C, D, H, W) or (B, C, H, W) predicted velocity
+        target: Same shape as output - target velocity
+        mask: (B, 1, D, H, W) or (B, 1, H, W) fluid mask (optional)
+        reduce: Whether to average over batch
+        eps: Small epsilon to prevent division by zero
+        
+    Returns:
+        Scalar loss if reduce=True, else (B,) tensor
+    """
+    if mask is not None:
+        # Apply mask to both
+        mask_expanded = mask.expand_as(output)
+        output = output * mask_expanded
+        target = target * mask_expanded
+    
+    # Determine spatial dimensions based on tensor rank
+    if output.dim() == 5:
+        # 3D: (B, C, D, H, W)
+        spatial_dims = (-3, -2, -1)
+    elif output.dim() == 4:
+        # 2D: (B, C, H, W)
+        spatial_dims = (-2, -1)
+    else:
+        raise ValueError(f"Expected 4D or 5D tensor, got {output.dim()}D")
+    
+    # Compute MSE per channel: (B, C)
+    mse_per_channel = torch.mean(
+        (output - target).pow(2),
+        dim=spatial_dims
+    )
+    
+    # Compute normalization weight per channel (mean squared target): (B, C)
+    weight_per_channel = torch.mean(
+        target.pow(2),
+        dim=spatial_dims
+    )
+    
+    # Normalized MSE per channel: (B, C)
+    normalized_mse = mse_per_channel / (weight_per_channel + eps)
+    
+    # Average over channels: (B,)
+    loss = torch.mean(normalized_mse, dim=-1)
+    
+    if reduce:
+        loss = loss.mean()
+    
+    return loss
+
+
 def kl_divergence(
     mu: torch.Tensor,
     *,

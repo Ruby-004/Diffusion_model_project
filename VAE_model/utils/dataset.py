@@ -205,13 +205,16 @@ class MicroFlowDataset(Dataset):
             },
         }
         
-        # Add per-component max values for velocity (critical for w-component training)
+        # Add per-component max and mean values for velocity (critical for w-component training)
         # Velocity shape: (N, num_slices, 3, H, W) where channels are (vx, vy, vz)
         if velocity.numel() > 0 and velocity.dim() >= 3:
             stats['U_per_component'] = {
                 'max_u': velocity[:, :, 0, :, :].abs().max().item(),
                 'max_v': velocity[:, :, 1, :, :].abs().max().item(),
                 'max_w': velocity[:, :, 2, :, :].abs().max().item(),
+                'mean_u': velocity[:, :, 0, :, :].abs().mean().item(),
+                'mean_v': velocity[:, :, 1, :, :].abs().mean().item(),
+                'mean_w': velocity[:, :, 2, :, :].abs().mean().item(),
             }
         
         if velocity_input.numel() > 0 and velocity_input.dim() >= 3:
@@ -219,6 +222,9 @@ class MicroFlowDataset(Dataset):
                 'max_u': velocity_input[:, :, 0, :, :].abs().max().item(),
                 'max_v': velocity_input[:, :, 1, :, :].abs().max().item(),
                 'max_w': velocity_input[:, :, 2, :, :].abs().max().item(),
+                'mean_u': velocity_input[:, :, 0, :, :].abs().mean().item(),
+                'mean_v': velocity_input[:, :, 1, :, :].abs().mean().item(),
+                'mean_w': velocity_input[:, :, 2, :, :].abs().mean().item(),
             }
 
         # save
@@ -321,13 +327,16 @@ class MicroFlowDatasetVAE(Dataset):
             },
         }
         
-        # Add per-component max values for velocity (critical for w-component training)
+        # Add per-component max and mean values for velocity (critical for w-component training)
         # Velocity shape: (N, num_slices, 3, H, W) where channels are (vx, vy, vz)
         if velocity_3d.numel() > 0 and velocity_3d.dim() >= 3:
             stats['U_per_component'] = {
                 'max_u': velocity_3d[:, :, 0, :, :].abs().max().item(),
                 'max_v': velocity_3d[:, :, 1, :, :].abs().max().item(),
                 'max_w': velocity_3d[:, :, 2, :, :].abs().max().item(),
+                'mean_u': velocity_3d[:, :, 0, :, :].abs().mean().item(),
+                'mean_v': velocity_3d[:, :, 1, :, :].abs().mean().item(),
+                'mean_w': velocity_3d[:, :, 2, :, :].abs().mean().item(),
             }
         
         if velocity_2d.numel() > 0 and velocity_2d.dim() >= 3:
@@ -335,6 +344,9 @@ class MicroFlowDatasetVAE(Dataset):
                 'max_u': velocity_2d[:, :, 0, :, :].abs().max().item(),
                 'max_v': velocity_2d[:, :, 1, :, :].abs().max().item(),
                 'max_w': velocity_2d[:, :, 2, :, :].abs().max().item(),
+                'mean_u': velocity_2d[:, :, 0, :, :].abs().mean().item(),
+                'mean_v': velocity_2d[:, :, 1, :, :].abs().mean().item(),
+                'mean_w': velocity_2d[:, :, 2, :, :].abs().mean().item(),
             }
         
         # Save

@@ -19,7 +19,7 @@ import torch.nn.functional as F
 
 from src.dual_vae.model import DualBranchVAE, kl_divergence
 from utils.dataset import get_loader, MicroFlowDatasetVAE
-from utils.metrics import normalized_mae_loss, kl_divergence as kl_div_metric, mae_loss_per_channel
+from utils.metrics import normalized_mae_loss, kl_divergence as kl_div_metric, mae_loss_per_channel, normalized_mae_loss_per_channel, normalized_mse_per_channel
 from torch.utils.data import DataLoader, Subset, Dataset
 
 # Force unbuffered output to see prints before crashes
@@ -61,13 +61,17 @@ def parse_args():
     parser.add_argument('--num-epochs', type=int, default=50)
     parser.add_argument('--learning-rate', type=float, default=5e-5)
     parser.add_argument('--device', type=str, default=None)
-    parser.add_argument('--per-component-norm', action='store_true', help='Use per-component normalization')
     parser.add_argument('--augment', action='store_true', help='Use data augmentation')
+    parser.add_argument('--loss-function', type=str, default='normalized_mae_per_channel', 
+                        choices=['mae_per_channel', 'normalized_mae_per_channel', 'normalized_mse_per_channel'],
+                        help='Reconstruction loss function (default: normalized_mae_per_channel)')
     
     # Loss weights
     parser.add_argument('--beta-kl', type=float, default=1e-3, help='KL divergence weight')
     parser.add_argument('--lambda-align', type=float, default=0.1, help='Alignment loss weight')
-    parser.add_argument('--lambda-cross', type=float, default=1.0, help='Cross-reconstruction (2D→3D) loss weight')
+    parser.add_argument('--lambda-cross', type=float, default=1.0, help='Cross-reconstruction (2D->3D) loss weight')
+    parser.add_argument('--norm-mode', type=str, default='max', choices=['max', 'mean'],
+                        help='Normalization mode: max (default) or mean velocity per component')
     
     args = parser.parse_args()
     if args.device is None:
@@ -178,26 +182,34 @@ def main():
     with open(stats_file, 'r') as f:
         statistics = json.load(f)
 
-    # Per-component normalization for better w-component learning
-    use_per_component = args.per_component_norm
+    # Per-component normalization for better w-component learning (always enabled)
+    use_per_component = True
+    norm_mode = args.norm_mode
     
     if use_per_component and 'U_per_component' in statistics:
         pc = statistics['U_per_component']
         pc_2d = statistics.get('U_2d_per_component', {})
         
-        # Use max of U and U_2d for each component
-        max_u = max(pc['max_u'], pc_2d.get('max_u', 0))
-        max_v = max(pc['max_v'], pc_2d.get('max_v', 0))
-        max_w = max(pc['max_w'], pc_2d.get('max_w', 0))
+        # Use max or mean of U and U_2d for each component based on norm_mode
+        if norm_mode == 'max':
+            norm_u = max(pc['max_u'], pc_2d.get('max_u', 0))
+            norm_v = max(pc['max_v'], pc_2d.get('max_v', 0))
+            norm_w = max(pc['max_w'], pc_2d.get('max_w', 0))
+            stat_key = 'max'
+        else:  # mean
+            norm_u = max(pc.get('mean_u', pc['max_u']), pc_2d.get('mean_u', pc_2d.get('max_u', 0)))
+            norm_v = max(pc.get('mean_v', pc['max_v']), pc_2d.get('mean_v', pc_2d.get('max_v', 0)))
+            norm_w = max(pc.get('mean_w', pc['max_w']), pc_2d.get('mean_w', pc_2d.get('max_w', 0)))
+            stat_key = 'mean'
         
         # Create per-component normalization tensor [3] for (u, v, w)
-        norm_factors = torch.tensor([max_u, max_v, max_w], dtype=torch.float32)
+        norm_factors = torch.tensor([norm_u, norm_v, norm_w], dtype=torch.float32)
         
-        print(f"\n=== Per-Component Normalization ===")
-        print(f"  max_u (vx): {max_u:.6f}")
-        print(f"  max_v (vy): {max_v:.6f}")
-        print(f"  max_w (vz): {max_w:.6f}")
-        print(f"  Ratio max_u/max_w: {max_u/max_w:.2f}x")
+        print(f"\n=== Per-Component Normalization ({norm_mode.upper()}) ===")
+        print(f"  {stat_key}_u (vx): {norm_u:.6f}")
+        print(f"  {stat_key}_v (vy): {norm_v:.6f}")
+        print(f"  {stat_key}_w (vz): {norm_w:.6f}")
+        print(f"  Ratio {stat_key}_u/{stat_key}_w: {norm_u/norm_w:.2f}x")
         print(f"===================================\n")
     else:
         # Fallback to global max (legacy behavior)
@@ -293,6 +305,15 @@ def main():
     # Optimizer - only trainable parameters
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args.learning_rate)
 
+    # Select loss function
+    loss_functions = {
+        'mae_per_channel': mae_loss_per_channel,
+        'normalized_mae_per_channel': normalized_mae_loss_per_channel,
+        'normalized_mse_per_channel': normalized_mse_per_channel
+    }
+    reconstruction_loss_fn = loss_functions[args.loss_function]
+    print(f"\nUsing reconstruction loss: {args.loss_function}")
+
     log_dict = {
         'loss': {
             'recons_2d_train': [], 'recons_2d_val': [],
@@ -304,10 +325,12 @@ def main():
         'in_channels': args.in_channels,
         'latent_channels': args.latent_channels,
         'per_component_norm': use_per_component,
+        'norm_mode': norm_mode,  # 'max' or 'mean'
         'norm_factors': norm_factors.tolist(),
         'stage1_checkpoint': args.stage1_checkpoint,
         'lambda_align': args.lambda_align,
         'lambda_cross': args.lambda_cross,
+        'loss_function': args.loss_function,
     }
     
     best_val_loss = float('inf')  # Track best validation loss for saving best model
@@ -391,7 +414,7 @@ def main():
             preds_2d = preds_2d * mask_2d
             targets_2d = targets_2d * mask_2d
             
-            reconstruction_loss_2d = mae_loss_per_channel(preds_2d, targets_2d, mask=mask_2d)
+            reconstruction_loss_2d = reconstruction_loss_fn(preds_2d, targets_2d, mask=mask_2d)
             kl_loss_2d = torch.tensor(0.0, device=device)
             
             # === Loss 2: Latent Alignment (||z_2d - z_3d||) ===
@@ -416,7 +439,7 @@ def main():
             targets_3d_masked = targets_3d * mask_3d
             
             # Cross-loss trains E2D to encode info useful for 3D reconstruction
-            cross_loss = mae_loss_per_channel(preds_3d_from_2d, targets_3d_masked, mask=mask_3d)
+            cross_loss = reconstruction_loss_fn(preds_3d_from_2d, targets_3d_masked, mask=mask_3d)
             
             # Total loss - cross_loss trains E2D even though D3D is frozen
             loss = (reconstruction_loss_2d +
@@ -508,7 +531,7 @@ def main():
                 preds_2d = preds_2d * mask_2d
                 targets_2d = targets_2d * mask_2d
                 
-                reconstruction_loss_2d = mae_loss_per_channel(preds_2d, targets_2d, mask=mask_2d)
+                reconstruction_loss_2d = reconstruction_loss_fn(preds_2d, targets_2d, mask=mask_2d)
                 kl_loss_2d = torch.tensor(0.0, device=device)
                 
                 # Alignment
@@ -523,7 +546,7 @@ def main():
                 preds_3d_from_2d = model_module.decoder_3d(mean_2d)
                 preds_3d_from_2d = preds_3d_from_2d * mask_3d  # Use 3D mask
                 targets_3d_masked = targets_3d * mask_3d
-                cross_loss = mae_loss_per_channel(preds_3d_from_2d, targets_3d_masked, mask=mask_3d)
+                cross_loss = reconstruction_loss_fn(preds_3d_from_2d, targets_3d_masked, mask=mask_3d)
                 
                 print(f'Val batch {j}: Recons2D/Align/Cross: {reconstruction_loss_2d.item():.6f}/{alignment_loss.item():.6f}/{cross_loss.item():.6f}')
                 sys.stdout.flush()
@@ -638,7 +661,7 @@ def main():
             preds_2d, mean_2d = model_module.forward_2d_deterministic(inputs_2d)
             preds_2d = preds_2d * mask_2d
             targets_2d = targets_2d * mask_2d
-            reconstruction_loss_2d = mae_loss_per_channel(preds_2d, targets_2d, mask=mask_2d)
+            reconstruction_loss_2d = reconstruction_loss_fn(preds_2d, targets_2d, mask=mask_2d)
             kl_loss_2d = torch.tensor(0.0, device=device)
             
             # Alignment
@@ -653,7 +676,7 @@ def main():
             preds_3d_from_2d = model_module.decoder_3d(mean_2d)
             preds_3d_from_2d = preds_3d_from_2d * mask_3d  # Use 3D mask
             targets_3d_masked = targets_3d * mask_3d
-            cross_loss = mae_loss_per_channel(preds_3d_from_2d, targets_3d_masked, mask=mask_3d)
+            cross_loss = reconstruction_loss_fn(preds_3d_from_2d, targets_3d_masked, mask=mask_3d)
             
             print(f'Test batch {k}: Recons2D/Align/Cross: {reconstruction_loss_2d.item():.6f}/{alignment_loss.item():.6f}/{cross_loss.item():.6f}')
             

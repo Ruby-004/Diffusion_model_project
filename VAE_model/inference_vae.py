@@ -659,10 +659,40 @@ def main():
         base_dataset = test_dataset
         actual_idx = args.index
     
-    print(f"Loading test sample {args.index} (actual index: {actual_idx})")
+    # For VAE dataset with mode filtering, find appropriate sample
+    if use_vae_dataset and mode in ['2d', '3d']:
+        # Check if the requested sample matches the mode
+        sample = test_dataset[args.index]
+        is_2d_sample = sample.get('is_2d', torch.tensor(False)).item()
+        
+        if (mode == '2d' and not is_2d_sample) or (mode == '3d' and is_2d_sample):
+            # Sample doesn't match requested mode, find one that does
+            print(f"\nWARNING: Index {args.index} is a {'2D' if is_2d_sample else '3D'} sample, but mode={mode} was requested.")
+            print(f"Searching for a {mode.upper()} sample in test set...")
+            
+            found_idx = None
+            for i in range(len(test_dataset)):
+                test_sample = test_dataset[i]
+                test_is_2d = test_sample.get('is_2d', torch.tensor(False)).item()
+                if (mode == '2d' and test_is_2d) or (mode == '3d' and not test_is_2d):
+                    found_idx = i
+                    break
+            
+            if found_idx is not None:
+                print(f"Found {mode.upper()} sample at index {found_idx}. Using this instead.")
+                args.index = found_idx
+                sample = test_dataset[found_idx]
+                if hasattr(test_dataset, 'indices'):
+                    actual_idx = test_dataset.indices[found_idx]
+                else:
+                    actual_idx = found_idx
+            else:
+                print(f"ERROR: No {mode.upper()} samples found in test set!")
+                print(f"Proceeding with index {args.index} (mismatched mode - results may not be meaningful)")
+    else:
+        sample = test_dataset[args.index]
     
-    # Get sample data
-    sample = test_dataset[args.index]
+    print(f"Loading test sample {args.index} (actual index: {actual_idx})")
     
     mask = sample['microstructure'].to(device)  # (1, D, H, W) or (D, 1, H, W)
     

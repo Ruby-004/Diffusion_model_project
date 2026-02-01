@@ -346,16 +346,33 @@ python inference.py `
 cd VAE_model
 ```
 ```bash
+# For Stage 2 (dual VAE with both 2D and 3D branches)
 python inference_vae.py `
   --vae-path trained/dual_vae_stage2_2d `
   --dataset-dir ../dataset_3d `
-  --index 0
+  --index 0 `
+  --mode 2d
 ```
 
+```bash
+# For Stage 1 (3D VAE only) - automatically finds 3D samples
+python inference_vae.py `
+  --vae-path trained/dual_vae_stage1_3d `
+  --dataset-dir ../dataset_3d `
+  --index 0 `
+  --mode 3d
+```
+
+**Note**: When using `--mode 3d` or `--mode 2d`, the script will automatically search for a matching sample type if the requested index doesn't match. For example, if you request index 0 with `--mode 3d` but index 0 is a 2D sample, it will automatically find the first 3D sample in the test set.
+
+**Important**: The VAE dataset treats 2D and 3D velocity fields as **separate samples**. In the test set:
+- First half of indices (0 to N/2): 2D velocity fields (vz=0)
+- Second half of indices (N/2+1 to N): 3D velocity fields (vz≠0)
+
 Displays:
-- Original vs reconstructed 2D velocity fields
-- Original vs reconstructed 3D velocity fields
-- Cross-reconstruction: 2D latent → 3D decoder output
+- Original vs reconstructed 2D velocity fields (mode=2d)
+- Original vs reconstructed 3D velocity fields (mode=3d)
+- Cross-reconstruction: 2D latent → 3D decoder output (mode=cross)
 
 #### F. Visualizing Training Progress
 
