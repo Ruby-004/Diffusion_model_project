@@ -525,7 +525,8 @@ def get_loader(
     pin_memory=True,
     seed=2024,
     k_folds: int = None,
-    use_3d: bool = False
+    use_3d: bool = False,
+    split_file: str = None  # Path to shared splits.json for consistency with VAE
 ) -> list[tuple[DataLoader, DataLoader, DataLoader]]:
     """
     Load dataset with 70/15/15 train/val/test split.
@@ -533,6 +534,8 @@ def get_loader(
     Args:
         root_dir: directory where data is stored.
         use_3d: whether to load 3D velocity data.
+        split_file: Optional path to splits.json for consistent splits with VAE.
+                    If provided, uses the split from this file instead of generating new one.
     
     Returns:
         List of tuples containing (train_loader, val_loader, test_loader).
@@ -557,25 +560,51 @@ def get_loader(
 
     # Split data: 70/15/15
     if k_folds is None:
-        # Manual split to match VAE model's splitting logic (ensures same microstructures in sets)
-        import random
-        
         num_samples = len(dataset)
-        indices = list(range(num_samples))
         
-        # Use Python's random with same seed as VAE to ensure identical split
-        rng = random.Random(seed)
-        rng.shuffle(indices)
+        # Check for shared split file (for consistency with VAE training)
+        split_path = split_file if split_file else os.path.join(root_dir, 'splits.json')
         
-        train_size = int(train_ratio * num_samples)
-        val_size = int(val_ratio * num_samples)
-        test_size = num_samples - train_size - val_size
-        
-        train_indices = indices[:train_size]
-        val_indices = indices[train_size:train_size + val_size]
-        test_indices = indices[train_size + val_size:]
-        
-        print(f"Dataset split: train={len(train_indices)}, val={len(val_indices)}, test={len(test_indices)} (total={num_samples})")
+        if os.path.exists(split_path):
+            # Load split from file for consistency with VAE
+            print(f"Loading split from {split_path} for VAE/diffusion consistency")
+            with open(split_path, 'r') as f:
+                split_data = json.load(f)
+            
+            train_indices = split_data['train']
+            val_indices = split_data['val']
+            test_indices = split_data['test']
+            
+            # Verify indices are valid for this dataset
+            max_idx = max(max(train_indices), max(val_indices), max(test_indices))
+            if max_idx >= num_samples:
+                print(f"WARNING: Split file has indices up to {max_idx} but dataset has {num_samples} samples")
+                print("  Filtering to valid indices...")
+                train_indices = [i for i in train_indices if i < num_samples]
+                val_indices = [i for i in val_indices if i < num_samples]
+                test_indices = [i for i in test_indices if i < num_samples]
+            
+            print(f"Using shared split: train={len(train_indices)}, val={len(val_indices)}, test={len(test_indices)}")
+        else:
+            # Generate new split (legacy behavior)
+            print(f"No split file found at {split_path}, generating new split with seed={seed}")
+            import random
+            
+            indices = list(range(num_samples))
+            
+            # Use Python's random with same seed as VAE to ensure identical split
+            rng = random.Random(seed)
+            rng.shuffle(indices)
+            
+            train_size = int(train_ratio * num_samples)
+            val_size = int(val_ratio * num_samples)
+            test_size = num_samples - train_size - val_size
+            
+            train_indices = indices[:train_size]
+            val_indices = indices[train_size:train_size + val_size]
+            test_indices = indices[train_size + val_size:]
+            
+            print(f"Dataset split: train={len(train_indices)}, val={len(val_indices)}, test={len(test_indices)} (total={num_samples})")
 
         # Create new datasets with augmentation ONLY for training
         train_set = _create_subset_dataset(dataset, train_indices, augment=augment, save_stats=True)
